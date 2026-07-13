@@ -10,6 +10,9 @@ export const CONFIG_KEY_COLUMNS = "boardColumns";
 /** Key used by BasesViewConfig.set/get to persist custom tag colors in the .base file. */
 export const CONFIG_KEY_TAG_COLORS = "tagColors";
 
+/** Key used by BasesViewConfig.set/get to persist custom tags list in the .base file. */
+export const CONFIG_KEY_CUSTOM_TAGS = "customTags";
+
 /** Key used by BasesViewConfig.set/get to persist card click behavior in the .base file. */
 export const CONFIG_KEY_OPEN_BEHAVIOR = "cardOpenBehavior";
 

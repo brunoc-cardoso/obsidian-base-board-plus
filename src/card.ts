@@ -6,6 +6,7 @@ import {
   ListValue,
   NullValue,
   setIcon,
+  setTooltip,
   TFile,
   Notice,
   Menu,
@@ -256,6 +257,14 @@ export class CardManager {
     });
     if (file instanceof TFile) {
       const fileTags = this.view.tags.extractTagsFromFile(file);
+      if (fileTags.length > 0) {
+        tagContainerEl.addClass("is-clickable");
+        setTooltip(tagContainerEl, "Click to edit tags");
+        tagContainerEl.addEventListener("click", (e) => {
+          e.stopPropagation();
+          this.view.tags.promptEditTags(file);
+        });
+      }
       for (const tag of fileTags) {
         const tagEl = tagContainerEl.createSpan({
           cls: "base-board-card-tag",

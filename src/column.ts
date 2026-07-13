@@ -255,7 +255,9 @@ export class ColumnManager {
             this.view.app,
             columnName,
             currentColor,
-            (color) => {
+            this.view.tags,
+            false,
+            (color: string) => {
               this.view.setColumnColor(columnName, color);
             },
           ).open();

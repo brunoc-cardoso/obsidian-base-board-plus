@@ -903,3 +903,97 @@
 .is-tablet .base-board-card-edit-btn {
   opacity: 0.6;
 }
+
+/* ---- Custom tag suggestions & creation ---- */
+
+.base-board-filter-add {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  color: var(--text-muted);
+  padding: 2px;
+  border-radius: var(--radius-s);
+  margin-left: 6px;
+  vertical-align: middle;
+  transition: background-color 0.15s ease, color 0.15s ease;
+}
+
+.base-board-filter-add svg {
+  width: 14px;
+  height: 14px;
+}
+
+.base-board-filter-add:hover {
+  color: var(--text-normal);
+  background-color: var(--background-modifier-hover);
+}
+
+.base-board-tag-suggestions-container {
+  margin-top: 16px;
+  margin-bottom: 16px;
+}
+
+.base-board-tag-suggestions-title {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  margin-bottom: 8px;
+}
+
+.base-board-tag-suggestions-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.base-board-tag-suggestions-empty {
+  font-size: var(--font-ui-smaller);
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.base-board-tag-suggestion-chip {
+  display: inline-flex;
+  align-items: center;
+  font-size: var(--font-ui-smaller);
+  padding: 4px 8px;
+  border-radius: 4px;
+  background-color: var(--tag-color, var(--background-modifier-hover));
+  color: var(--text-normal);
+  cursor: pointer;
+  opacity: 0.55;
+  border: 1px solid transparent;
+  transition: opacity 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.base-board-tag-suggestion-chip:hover {
+  opacity: 0.85;
+}
+
+.base-board-tag-suggestion-chip.is-active {
+  opacity: 1;
+  border-color: var(--interactive-accent);
+  font-weight: var(--font-semibold);
+  box-shadow: 0 0 0 1px var(--interactive-accent);
+}
+
+.base-board-tag-suggestion-chip.base-board-tag-suggestion-chip-light {
+  color: #ffffff;
+  text-shadow: 0 1px 1px rgba(0, 0, 0, 0.3);
+}
+
+.base-board-tag-suggestion-chip.base-board-tag-suggestion-chip-dark {
+  color: #1c212b;
+  text-shadow: none;
+}
+
+/* Clickable card tag container */
+.base-board-tag-container.is-clickable {
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.base-board-tag-container.is-clickable:hover {
+  opacity: 0.8;
+}
+

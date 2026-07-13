@@ -1,12 +1,13 @@
 import { KanbanView } from "./kanban-view";
-import { CONFIG_KEY_TAG_COLORS } from "./constants";
-import { App, Modal, TFile, setIcon, setTooltip, Setting } from "obsidian";
+import { CONFIG_KEY_TAG_COLORS, CONFIG_KEY_CUSTOM_TAGS } from "./constants";
+import { App, Modal, TFile, TFolder, setIcon, setTooltip, Setting, Notice } from "obsidian";
 import { TagEditModal } from "./tag-edit-modal";
 import { relativeLuminance } from "./color-utils";
 
 export class Tags {
-  private view: KanbanView;
+  public view: KanbanView;
   public activeFilters: Set<string> = new Set();
+  private hasSyncedTagsFile = false;
 
   constructor(view: KanbanView) {
     this.view = view;
@@ -17,6 +18,115 @@ export class Tags {
     return raw && typeof raw === "object"
       ? (raw as Record<string, string>)
       : {};
+  }
+
+  public getCustomTags(): string[] {
+    const raw = this.view.config?.get(CONFIG_KEY_CUSTOM_TAGS);
+    return Array.isArray(raw)
+      ? raw.filter((t): t is string => typeof t === "string")
+      : [];
+  }
+
+  public addCustomTag(tag: string): void {
+    const tags = this.getCustomTags();
+    if (!tags.includes(tag)) {
+      tags.push(tag);
+      this.view.config?.set(CONFIG_KEY_CUSTOM_TAGS, tags);
+      void this.updateTagsIndexFile();
+      this.view.scheduleRender();
+    }
+  }
+
+  public removeCustomTag(tag: string): void {
+    const tags = this.getCustomTags().filter((t) => t !== tag);
+    this.view.config?.set(CONFIG_KEY_CUSTOM_TAGS, tags);
+    this.setColor(tag, "");
+    void this.updateTagsIndexFile();
+    this.view.scheduleRender();
+  }
+
+  public getBoardFolder(): string {
+    const entries = this.view.data?.data ?? [];
+    if (entries.length > 0) {
+      const firstPath = entries[0].file?.path ?? "";
+      const parts = firstPath.split("/");
+      
+      // Traverse upwards from the folder containing the first note
+      // e.g. if note is "My Board/Tasks/note.md", start with folder "My Board/Tasks"
+      let currentFolderParts = parts.slice(0, -1);
+      
+      while (currentFolderParts.length > 0) {
+        const folderPath = currentFolderParts.join("/");
+        const folderFile = this.view.app.vault.getAbstractFileByPath(folderPath);
+        if (folderFile instanceof TFolder) {
+          // Check if this folder contains any .base file
+          const hasBaseFile = folderFile.children.some(
+            (child) => child instanceof TFile && child.extension === "base"
+          );
+          if (hasBaseFile) {
+            return folderPath;
+          }
+        }
+        currentFolderParts.pop(); // Go up one level
+      }
+      
+      // Check the root folder as well
+      const rootFolder = this.view.app.vault.getRoot();
+      const hasBaseFileInRoot = rootFolder.children.some(
+        (child) => child instanceof TFile && child.extension === "base"
+      );
+      if (hasBaseFileInRoot) {
+        return "";
+      }
+      
+      // Fallback to the original logic: parent of parent (parts.slice(0, -2)) if it exists
+      if (parts.length > 2) {
+        return parts.slice(0, -2).join("/");
+      }
+    }
+    return "";
+  }
+
+  private async updateTagsIndexFile(): Promise<void> {
+    const customTags = this.getCustomTags();
+    const boardFolder = this.getBoardFolder();
+    const tagsFilePath = boardFolder ? `${boardFolder}/base-board-tags.md` : "base-board-tags.md";
+
+    const vault = this.view.app.vault;
+    const file = vault.getAbstractFileByPath(tagsFilePath);
+
+    if (customTags.length === 0) {
+      if (file && file instanceof TFile) {
+        try {
+          await vault.delete(file);
+        } catch (e) {
+          // ignore
+        }
+      }
+      return;
+    }
+
+    const content = [
+      "%% Este arquivo é gerado automaticamente pelo Base Board Plus para registrar as tags personalizadas no Obsidian %%",
+      "%% Não edite manualmente %%",
+      "",
+      "# Tags Personalizadas",
+      customTags.map((t) => `#${t}`).join(" "),
+      "",
+    ].join("\n");
+
+    try {
+      if (file && file instanceof TFile) {
+        const currentContent = await vault.read(file);
+        if (currentContent !== content) {
+          await vault.modify(file, content);
+        }
+      } else {
+        await vault.create(tagsFilePath, content);
+      }
+    } catch (e) {
+      console.error("Base Board Plus: Falha ao escrever arquivo de tags customizadas", e);
+    }
   }
 
   public getDeterministicColor(tag: string): string {
@@ -94,6 +204,11 @@ export class Tags {
   }
 
   public renderFilterBar(container: HTMLElement): void {
+    if (!this.hasSyncedTagsFile) {
+      this.hasSyncedTagsFile = true;
+      void this.updateTagsIndexFile();
+    }
+
     const allTags = new Set<string>();
 
     for (const group of this.view.currentGroups) {
@@ -104,6 +219,9 @@ export class Tags {
         }
       }
     }
+
+    const customTags = this.getCustomTags();
+    customTags.forEach((t) => allTags.add(t));
 
     if (allTags.size === 0 && this.activeFilters.size === 0) {
       return;
@@ -121,6 +239,23 @@ export class Tags {
       text: "Filters:",
     });
     setIcon(titleEl, "lucide-filter");
+
+    const addBtn = barEl.createSpan({
+      cls: "base-board-filter-add",
+    });
+    setIcon(addBtn, "lucide-plus");
+    setTooltip(addBtn, "Create custom tag");
+    addBtn.addEventListener("click", () => {
+      new CreateTagModal(this.view.app, (name, color) => {
+        const cleaned = name.trim().startsWith("#") ? name.trim().slice(1) : name.trim();
+        if (cleaned) {
+          this.addCustomTag(cleaned);
+          if (color) {
+            this.setColor(cleaned, color);
+          }
+        }
+      }).open();
+    });
 
     const tagsArray = Array.from(allTags).sort();
 
@@ -151,7 +286,7 @@ export class Tags {
 
       pill.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        new ColorPickerModal(this.view.app, tag, tagColor, (color) =>
+        new ColorPickerModal(this.view.app, tag, tagColor, this, true, (color) =>
           this.setColor(tag, color),
         ).open();
       });
@@ -186,17 +321,23 @@ export class Tags {
 export class ColorPickerModal extends Modal {
   private tag: string;
   private currentColor: string;
+  private tagsManager: Tags;
+  private isTag: boolean;
   private onChange: (color: string) => void;
 
   constructor(
     app: App,
     tag: string,
     currentColor: string,
+    tagsManager: Tags,
+    isTag: boolean,
     onChange: (color: string) => void,
   ) {
     super(app);
     this.tag = tag;
     this.currentColor = currentColor;
+    this.tagsManager = tagsManager;
+    this.isTag = isTag;
     this.onChange = onChange;
   }
 
@@ -212,7 +353,20 @@ export class ColorPickerModal extends Modal {
       });
     });
 
-    new Setting(contentEl)
+    const isCustom = this.isTag && this.tagsManager.getCustomTags().includes(this.tag);
+
+    const actionSetting = new Setting(contentEl);
+    if (isCustom) {
+      actionSetting.addButton((btn) => {
+        btn.setButtonText("Delete custom tag").onClick(() => {
+          this.tagsManager.removeCustomTag(this.tag);
+          this.close();
+        });
+        btn.buttonEl.classList.add("mod-danger");
+      });
+    }
+
+    actionSetting
       .addButton((btn) => {
         btn.setButtonText("Reset to default").onClick(() => {
           this.onChange("");
@@ -225,6 +379,63 @@ export class ColorPickerModal extends Modal {
           .setButtonText("Done")
           .setCta()
           .onClick(() => this.close());
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+
+// ---------------------------------------------------------------------------
+//  Create Tag modal
+// ---------------------------------------------------------------------------
+
+export class CreateTagModal extends Modal {
+  private onSubmit: (name: string, color: string) => void;
+
+  constructor(app: App, onSubmit: (name: string, color: string) => void) {
+    super(app);
+    this.onSubmit = onSubmit;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    this.titleEl.setText("Create Custom Tag");
+
+    let name = "";
+    let color = "#4285f4";
+
+    new Setting(contentEl).setName("Tag name").addText((text) => {
+      text.setPlaceholder("e.g. urgent").onChange((value) => {
+        name = value;
+      });
+    });
+
+    new Setting(contentEl).setName("Tag color").addColorPicker((cp) => {
+      cp.setValue(color);
+      cp.onChange((value) => {
+        color = value;
+      });
+    });
+
+    new Setting(contentEl)
+      .addButton((btn) => {
+        btn.setButtonText("Cancel").onClick(() => this.close());
+      })
+      .addButton((btn) => {
+        btn
+          .setButtonText("Create")
+          .setCta()
+          .onClick(() => {
+            const cleaned = name.trim();
+            if (!cleaned) {
+              new Notice("Tag name cannot be empty.");
+              return;
+            }
+            this.close();
+            this.onSubmit(cleaned, color);
+          });
       });
   }
 
