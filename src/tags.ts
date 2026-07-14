@@ -1,6 +1,15 @@
 import { KanbanView } from "./kanban-view";
 import { CONFIG_KEY_TAG_COLORS, CONFIG_KEY_CUSTOM_TAGS } from "./constants";
-import { App, Modal, TFile, TFolder, setIcon, setTooltip, Setting, Notice } from "obsidian";
+import {
+  App,
+  Modal,
+  TFile,
+  TFolder,
+  setIcon,
+  setTooltip,
+  Setting,
+  Notice,
+} from "obsidian";
 import { TagEditModal } from "./tag-edit-modal";
 import { relativeLuminance } from "./color-utils";
 
@@ -50,18 +59,19 @@ export class Tags {
     if (entries.length > 0) {
       const firstPath = entries[0].file?.path ?? "";
       const parts = firstPath.split("/");
-      
+
       // Traverse upwards from the folder containing the first note
       // e.g. if note is "My Board/Tasks/note.md", start with folder "My Board/Tasks"
       let currentFolderParts = parts.slice(0, -1);
-      
+
       while (currentFolderParts.length > 0) {
         const folderPath = currentFolderParts.join("/");
-        const folderFile = this.view.app.vault.getAbstractFileByPath(folderPath);
+        const folderFile =
+          this.view.app.vault.getAbstractFileByPath(folderPath);
         if (folderFile instanceof TFolder) {
           // Check if this folder contains any .base file
           const hasBaseFile = folderFile.children.some(
-            (child) => child instanceof TFile && child.extension === "base"
+            (child) => child instanceof TFile && child.extension === "base",
           );
           if (hasBaseFile) {
             return folderPath;
@@ -69,16 +79,16 @@ export class Tags {
         }
         currentFolderParts.pop(); // Go up one level
       }
-      
+
       // Check the root folder as well
       const rootFolder = this.view.app.vault.getRoot();
       const hasBaseFileInRoot = rootFolder.children.some(
-        (child) => child instanceof TFile && child.extension === "base"
+        (child) => child instanceof TFile && child.extension === "base",
       );
       if (hasBaseFileInRoot) {
         return "";
       }
-      
+
       // Fallback to the original logic: parent of parent (parts.slice(0, -2)) if it exists
       if (parts.length > 2) {
         return parts.slice(0, -2).join("/");
@@ -90,7 +100,9 @@ export class Tags {
   private async updateTagsIndexFile(): Promise<void> {
     const customTags = this.getCustomTags();
     const boardFolder = this.getBoardFolder();
-    const tagsFilePath = boardFolder ? `${boardFolder}/base-board-tags.md` : "base-board-tags.md";
+    const tagsFilePath = boardFolder
+      ? `${boardFolder}/base-board-tags.md`
+      : "base-board-tags.md";
 
     const vault = this.view.app.vault;
     const file = vault.getAbstractFileByPath(tagsFilePath);
@@ -98,8 +110,8 @@ export class Tags {
     if (customTags.length === 0) {
       if (file && file instanceof TFile) {
         try {
-          await vault.delete(file);
-        } catch (e) {
+          await this.view.app.fileManager.trashFile(file);
+        } catch {
           // ignore
         }
       }
@@ -125,7 +137,10 @@ export class Tags {
         await vault.create(tagsFilePath, content);
       }
     } catch (e) {
-      console.error("Base Board Plus: Falha ao escrever arquivo de tags customizadas", e);
+      console.error(
+        "Base Board Plus: Falha ao escrever arquivo de tags customizadas",
+        e,
+      );
     }
   }
 
@@ -247,7 +262,9 @@ export class Tags {
     setTooltip(addBtn, "Create custom tag");
     addBtn.addEventListener("click", () => {
       new CreateTagModal(this.view.app, (name, color) => {
-        const cleaned = name.trim().startsWith("#") ? name.trim().slice(1) : name.trim();
+        const cleaned = name.trim().startsWith("#")
+          ? name.trim().slice(1)
+          : name.trim();
         if (cleaned) {
           this.addCustomTag(cleaned);
           if (color) {
@@ -286,8 +303,13 @@ export class Tags {
 
       pill.addEventListener("contextmenu", (e) => {
         e.preventDefault();
-        new ColorPickerModal(this.view.app, tag, tagColor, this, true, (color) =>
-          this.setColor(tag, color),
+        new ColorPickerModal(
+          this.view.app,
+          tag,
+          tagColor,
+          this,
+          true,
+          (color) => this.setColor(tag, color),
         ).open();
       });
 
@@ -353,7 +375,8 @@ export class ColorPickerModal extends Modal {
       });
     });
 
-    const isCustom = this.isTag && this.tagsManager.getCustomTags().includes(this.tag);
+    const isCustom =
+      this.isTag && this.tagsManager.getCustomTags().includes(this.tag);
 
     const actionSetting = new Setting(contentEl);
     if (isCustom) {
@@ -401,13 +424,13 @@ export class CreateTagModal extends Modal {
 
   onOpen(): void {
     const { contentEl } = this;
-    this.titleEl.setText("Create Custom Tag");
+    this.titleEl.setText("Create custom tag");
 
     let name = "";
     let color = "#4285f4";
 
     new Setting(contentEl).setName("Tag name").addText((text) => {
-      text.setPlaceholder("e.g. urgent").onChange((value) => {
+      text.setPlaceholder("E.g. Urgent").onChange((value) => {
         name = value;
       });
     });

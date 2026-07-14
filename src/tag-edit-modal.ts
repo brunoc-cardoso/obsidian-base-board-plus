@@ -1,4 +1,4 @@
-import { App, Modal, Setting, setIcon, TFile, Notice } from "obsidian";
+import { App, Modal, Setting, setIcon, TFile } from "obsidian";
 import { Tags } from "./tags";
 import { relativeLuminance } from "./color-utils";
 
@@ -155,7 +155,7 @@ export class TagEditModal extends Modal {
 
   private renderSuggestions() {
     this.suggestionsContainerEl.empty();
-    this.suggestionsContainerEl.createEl("div", {
+    this.suggestionsContainerEl.createDiv({
       text: "Available tags:",
       cls: "base-board-tag-suggestions-title",
     });
