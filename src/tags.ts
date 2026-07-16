@@ -100,13 +100,36 @@ export class Tags {
   private async updateTagsIndexFile(): Promise<void> {
     const customTags = this.getCustomTags();
     const boardFolder = this.getBoardFolder();
-    const tagsFilePath = boardFolder
+    const vault = this.view.app.vault;
+
+    const oldTagsFilePath = boardFolder
       ? `${boardFolder}/base-board-tags.md`
       : "base-board-tags.md";
+    const configFolderPath = boardFolder ? `${boardFolder}/Config` : "Config";
+    const newTagsFilePath = boardFolder
+      ? `${boardFolder}/Config/custom-tags.md`
+      : "Config/custom-tags.md";
 
-    const vault = this.view.app.vault;
-    const file = vault.getAbstractFileByPath(tagsFilePath);
+    // 1. Migration check: if old file exists, move and rename it to Config/custom-tags.md
+    const oldFile = vault.getAbstractFileByPath(oldTagsFilePath);
+    if (oldFile && oldFile instanceof TFile) {
+      try {
+        const configFolder = vault.getAbstractFileByPath(configFolderPath);
+        if (!configFolder) {
+          await vault.createFolder(configFolderPath);
+        }
+        await vault.rename(oldFile, newTagsFilePath);
+      } catch (e) {
+        console.error(
+          "Base Board Plus: Falha na migração do arquivo de tags",
+          e,
+        );
+      }
+    }
 
+    const file = vault.getAbstractFileByPath(newTagsFilePath);
+
+    // 2. If no custom tags, clean up the file
     if (customTags.length === 0) {
       if (file && file instanceof TFile) {
         try {
@@ -118,6 +141,7 @@ export class Tags {
       return;
     }
 
+    // 3. Generate content and ensure folder structure exists
     const content = [
       "%% Este arquivo é gerado automaticamente pelo Base Board Plus para registrar as tags personalizadas no Obsidian %%",
       "%% Não edite manualmente %%",
@@ -128,13 +152,18 @@ export class Tags {
     ].join("\n");
 
     try {
+      const configFolder = vault.getAbstractFileByPath(configFolderPath);
+      if (!configFolder) {
+        await vault.createFolder(configFolderPath);
+      }
+
       if (file && file instanceof TFile) {
         const currentContent = await vault.read(file);
         if (currentContent !== content) {
           await vault.modify(file, content);
         }
       } else {
-        await vault.create(tagsFilePath, content);
+        await vault.create(newTagsFilePath, content);
       }
     } catch (e) {
       console.error(
