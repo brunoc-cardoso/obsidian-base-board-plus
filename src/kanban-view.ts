@@ -908,12 +908,12 @@ export class KanbanView extends BasesView implements HoverParent {
     this.columnManager.renderAddColumnButton(boardEl);
     this.dragDropManager.initBoard(boardEl);
     this.restoreScrollState(boardEl, scrollState);
-    this.hideHeaderAddButtons();
-    window.setTimeout(() => this.hideHeaderAddButtons(), 50);
-    window.setTimeout(() => this.hideHeaderAddButtons(), 300);
+    this.removeHeaderAddButtons();
+    window.setTimeout(() => this.removeHeaderAddButtons(), 50);
+    window.setTimeout(() => this.removeHeaderAddButtons(), 300);
   }
 
-  private hideHeaderAddButtons(): void {
+  private removeHeaderAddButtons(): void {
     const root =
       this.containerEl.closest(
         ".workspace-leaf, .bases-view, .view-content, .workspace-split",
@@ -951,7 +951,6 @@ export class KanbanView extends BasesView implements HoverParent {
         aria === "add note";
 
       if (isNewButton) {
-        el.classList.add("base-board-hidden");
         const parent = el.parentElement;
         if (
           parent &&
@@ -961,7 +960,9 @@ export class KanbanView extends BasesView implements HoverParent {
             parent.classList.contains("view-action") ||
             parent.children.length === 1)
         ) {
-          parent.classList.add("base-board-hidden");
+          parent.remove();
+        } else {
+          el.remove();
         }
       }
     });
