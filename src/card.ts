@@ -638,35 +638,7 @@ export class CardManager {
     columnName: string,
     targetOrder: OrderValue,
   ): Promise<void> {
-    const groupByProp = this.view.getGroupByProperty();
-    if (!groupByProp) {
-      new Notice("Cannot create card: no group by property configured.");
-      return;
-    }
-
-    const overrides = (fm: Record<string, unknown>) => {
-      fm[groupByProp] = columnName;
-      fm[ORDER_PROPERTY] = targetOrder;
-    };
-
-    try {
-      this.view.registerPendingCreation(title);
-      await this.view.createFileForView(title, overrides);
-      if (this.view.isColumnFoldersEnabled()) {
-        await this.view.ensureCardInColumnFolder(title, columnName);
-      }
-      const cardFile = this.view.findCardFileByTitle(title, columnName);
-      if (cardFile) {
-        await this.view.applyTemplateToCard(
-          cardFile,
-          title,
-          columnName,
-          targetOrder,
-        );
-      }
-    } catch (err) {
-      new Notice(`Failed to create card: ${String(err)}`);
-    }
+    await this.view.createCardFile(title, columnName, targetOrder);
   }
 
   // ---------------------------------------------------------------------------

@@ -433,6 +433,126 @@ export class KanbanView extends BasesView implements HoverParent {
     return null;
   }
 
+  /**
+   * Create a new card note directly in the vault, without opening any modal.
+   * Builds the initial frontmatter and template body in-memory and writes
+   * the file in a single vault.create() call so Obsidian Bases never gets
+   * a chance to show its "new note" dialog.
+   *
+   * Returns the created TFile, or null on failure.
+   */
+  public async createCardFile(
+    title: string,
+    columnName: string,
+    targetOrder: OrderValue,
+  ): Promise<TFile | null> {
+    const groupByProp = this.getGroupByProperty();
+    if (!groupByProp) {
+      new Notice("Cannot create card: no group by property configured.");
+      return null;
+    }
+
+    // --- Build destination path ---
+    const safeTitle = sanitizeFilename(title);
+    const tasksFolder = this.getTasksFolder();
+
+    let destFolder = tasksFolder;
+    if (this.isColumnFoldersEnabled() && columnName !== NO_VALUE_COLUMN) {
+      const sanitizedCol = sanitizeFilename(columnName.trim());
+      if (sanitizedCol) {
+        destFolder = `${tasksFolder}/${sanitizedCol}`;
+      }
+    }
+
+    const vault = this.app.vault;
+    if (!vault.getAbstractFileByPath(destFolder)) {
+      await vault.createFolder(destFolder);
+    }
+
+    let destPath = `${destFolder}/${safeTitle}.md`;
+    let counter = 1;
+    while (vault.getAbstractFileByPath(destPath)) {
+      destPath = `${destFolder}/${safeTitle} ${counter}.md`;
+      counter++;
+    }
+
+    // --- Build frontmatter ---
+    const now = new Date();
+    const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
+    const dateStr = now.toISOString().split("T")[0];
+    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+    const processPlaceholders = (text: string): string =>
+      text
+        .replace(/\{\{\s*title\s*\}\}/gi, title)
+        .replace(/\{\{\s*date\s*\}\}/gi, dateStr)
+        .replace(/\{\{\s*time\s*\}\}/gi, timeStr);
+
+    // Start with required board properties
+    const fm: Record<string, unknown> = {
+      [groupByProp]: columnName === NO_VALUE_COLUMN ? undefined : columnName,
+      [ORDER_PROPERTY]: targetOrder,
+    };
+    if (columnName === NO_VALUE_COLUMN) delete fm[groupByProp];
+
+    // Merge template frontmatter if a template is configured
+    let bodyText = "";
+    const templateFile = this.getTemplateFile();
+    if (templateFile) {
+      try {
+        const raw = await vault.read(templateFile);
+        const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
+        if (match) {
+          try {
+            const parsed = parseYaml(match[1]) as unknown;
+            if (parsed && typeof parsed === "object") {
+              const templateFm = parsed as Record<string, unknown>;
+              for (const k of Object.keys(templateFm)) {
+                if (k === groupByProp || k === ORDER_PROPERTY) continue;
+                const v = templateFm[k];
+                fm[k] = typeof v === "string" ? processPlaceholders(v) : v;
+              }
+            }
+          } catch {
+            // ignore yaml parse error
+          }
+          bodyText = processPlaceholders(match[2]);
+        } else {
+          bodyText = processPlaceholders(raw);
+        }
+      } catch {
+        // ignore template read error
+      }
+    }
+
+    // --- Serialise frontmatter ---
+    const fmLines: string[] = ["---"];
+    for (const k of Object.keys(fm)) {
+      const v = fm[k];
+      if (v === undefined) continue;
+      if (typeof v === "string") {
+        fmLines.push(`${k}: "${v.replace(/"/g, '\\"')}"`);
+      } else if (Array.isArray(v)) {
+        fmLines.push(`${k}:`);
+        for (const item of v) fmLines.push(`  - ${String(item)}`);
+      } else {
+        fmLines.push(`${k}: ${JSON.stringify(v)}`);
+      }
+    }
+    fmLines.push("---");
+
+    const fileContent = fmLines.join("\n") + "\n" + bodyText;
+
+    // --- Create the file ---
+    try {
+      this.registerPendingCreation(title);
+      const file = await vault.create(destPath, fileContent);
+      return file;
+    } catch (err) {
+      new Notice(`Failed to create card: ${String(err)}`);
+      return null;
+    }
+  }
   public async applyTemplateToCard(
     cardFile: TFile,
     title: string,
@@ -908,64 +1028,6 @@ export class KanbanView extends BasesView implements HoverParent {
     this.columnManager.renderAddColumnButton(boardEl);
     this.dragDropManager.initBoard(boardEl);
     this.restoreScrollState(boardEl, scrollState);
-    this.removeHeaderAddButtons();
-    window.setTimeout(() => this.removeHeaderAddButtons(), 50);
-    window.setTimeout(() => this.removeHeaderAddButtons(), 300);
-  }
-
-  private removeHeaderAddButtons(): void {
-    const root =
-      this.containerEl.closest(
-        ".workspace-leaf, .bases-view, .view-content, .workspace-split",
-      ) ?? this.containerEl.parentElement;
-    if (!root) return;
-
-    const elements = root.querySelectorAll(
-      "button, a, div, span, [role='button'], .clickable-icon",
-    );
-
-    elements.forEach((el) => {
-      if (
-        el.closest(".base-board-column") ||
-        el.closest(".base-board-filter-bar") ||
-        el.closest(".base-board-cards")
-      ) {
-        return;
-      }
-
-      const text = el.textContent?.trim() ?? "";
-      const aria = (
-        el.getAttribute("aria-label") ??
-        el.getAttribute("data-tooltip") ??
-        ""
-      ).toLowerCase();
-
-      const isNewButton =
-        text === "+ New" ||
-        text === "New" ||
-        text === "+ New note" ||
-        text.startsWith("+ New") ||
-        text.startsWith("New ") ||
-        aria === "new note" ||
-        aria === "create note" ||
-        aria === "add note";
-
-      if (isNewButton) {
-        const parent = el.parentElement;
-        if (
-          parent &&
-          !parent.closest(".base-board-column") &&
-          !parent.closest(".base-board-filter-bar") &&
-          (parent.classList.contains("bases-header-action") ||
-            parent.classList.contains("view-action") ||
-            parent.children.length === 1)
-        ) {
-          parent.remove();
-        } else {
-          el.remove();
-        }
-      }
-    });
   }
 
   private captureScrollState(): BoardScrollState {
