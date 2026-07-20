@@ -909,35 +909,59 @@ export class KanbanView extends BasesView implements HoverParent {
     this.dragDropManager.initBoard(boardEl);
     this.restoreScrollState(boardEl, scrollState);
     this.hideHeaderAddButtons();
+    window.setTimeout(() => this.hideHeaderAddButtons(), 50);
+    window.setTimeout(() => this.hideHeaderAddButtons(), 300);
   }
 
   private hideHeaderAddButtons(): void {
     const root =
-      this.containerEl.closest(".workspace-leaf, .bases-view, .view-content") ??
-      this.containerEl.parentElement;
+      this.containerEl.closest(
+        ".workspace-leaf, .bases-view, .view-content, .workspace-split",
+      ) ?? this.containerEl.parentElement;
     if (!root) return;
 
-    const headerActions = root.querySelectorAll(
-      ".bases-header .clickable-icon, .bases-toolbar .clickable-icon, .view-header-nav-buttons .clickable-icon, .bases-view-toolbar .clickable-icon",
+    const elements = root.querySelectorAll(
+      "button, a, div, span, [role='button'], .clickable-icon",
     );
 
-    headerActions.forEach((el) => {
+    elements.forEach((el) => {
+      if (
+        el.closest(".base-board-column") ||
+        el.closest(".base-board-filter-bar") ||
+        el.closest(".base-board-cards")
+      ) {
+        return;
+      }
+
+      const text = el.textContent?.trim() ?? "";
       const aria = (
         el.getAttribute("aria-label") ??
         el.getAttribute("data-tooltip") ??
         ""
       ).toLowerCase();
-      if (
-        aria.includes("new") ||
-        aria.includes("create") ||
-        aria.includes("add") ||
-        aria.includes("note")
-      ) {
+
+      const isNewButton =
+        text === "+ New" ||
+        text === "New" ||
+        text === "+ New note" ||
+        text.startsWith("+ New") ||
+        text.startsWith("New ") ||
+        aria === "new note" ||
+        aria === "create note" ||
+        aria === "add note";
+
+      if (isNewButton) {
+        el.classList.add("base-board-hidden");
+        const parent = el.parentElement;
         if (
-          !el.closest(".base-board-column") &&
-          !el.closest(".base-board-filter-bar")
+          parent &&
+          !parent.closest(".base-board-column") &&
+          !parent.closest(".base-board-filter-bar") &&
+          (parent.classList.contains("bases-header-action") ||
+            parent.classList.contains("view-action") ||
+            parent.children.length === 1)
         ) {
-          el.classList.add("base-board-hidden");
+          parent.classList.add("base-board-hidden");
         }
       }
     });
