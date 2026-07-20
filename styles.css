@@ -29,9 +29,29 @@
   align-items: flex-start;
 }
 
-/* Utility — used to hide the + button while inline card creation input is open */
-.base-board-column-header .base-board-hidden {
-  display: none;
+/* Utility — used to hide elements such as header buttons */
+.base-board-hidden {
+  display: none !important;
+}
+
+/* Hide header/toolbar add buttons next to search and filter bar add button */
+.bases-header .clickable-icon[aria-label*="New" i],
+.bases-header .clickable-icon[aria-label*="Create" i],
+.bases-header .clickable-icon[aria-label*="Add" i],
+.bases-header .clickable-icon[data-tooltip*="New" i],
+.bases-header .clickable-icon[data-tooltip*="Create" i],
+.bases-header .clickable-icon[data-tooltip*="Add" i],
+.bases-toolbar .clickable-icon[aria-label*="New" i],
+.bases-toolbar .clickable-icon[aria-label*="Create" i],
+.bases-toolbar .clickable-icon[aria-label*="Add" i],
+.bases-toolbar .clickable-icon[data-tooltip*="New" i],
+.bases-toolbar .clickable-icon[data-tooltip*="Create" i],
+.bases-toolbar .clickable-icon[data-tooltip*="Add" i],
+.bases-view-toolbar .clickable-icon[aria-label*="New" i],
+.bases-view-toolbar .clickable-icon[aria-label*="Create" i],
+.bases-view-toolbar .clickable-icon[aria-label*="Add" i],
+.base-board-filter-add {
+  display: none !important;
 }
 
 /* ---- Placeholder (no groupBy set) ---- */

@@ -284,25 +284,6 @@ export class Tags {
     });
     setIcon(titleEl, "lucide-filter");
 
-    const addBtn = barEl.createSpan({
-      cls: "base-board-filter-add",
-    });
-    setIcon(addBtn, "lucide-plus");
-    setTooltip(addBtn, "Create custom tag");
-    addBtn.addEventListener("click", () => {
-      new CreateTagModal(this.view.app, (name, color) => {
-        const cleaned = name.trim().startsWith("#")
-          ? name.trim().slice(1)
-          : name.trim();
-        if (cleaned) {
-          this.addCustomTag(cleaned);
-          if (color) {
-            this.setColor(cleaned, color);
-          }
-        }
-      }).open();
-    });
-
     const tagsArray = Array.from(allTags).sort();
 
     // Also include any active filters that might not be in the current cards

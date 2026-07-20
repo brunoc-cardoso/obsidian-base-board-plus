@@ -908,6 +908,39 @@ export class KanbanView extends BasesView implements HoverParent {
     this.columnManager.renderAddColumnButton(boardEl);
     this.dragDropManager.initBoard(boardEl);
     this.restoreScrollState(boardEl, scrollState);
+    this.hideHeaderAddButtons();
+  }
+
+  private hideHeaderAddButtons(): void {
+    const root =
+      this.containerEl.closest(".workspace-leaf, .bases-view, .view-content") ??
+      this.containerEl.parentElement;
+    if (!root) return;
+
+    const headerActions = root.querySelectorAll(
+      ".bases-header .clickable-icon, .bases-toolbar .clickable-icon, .view-header-nav-buttons .clickable-icon, .bases-view-toolbar .clickable-icon",
+    );
+
+    headerActions.forEach((el) => {
+      const aria = (
+        el.getAttribute("aria-label") ??
+        el.getAttribute("data-tooltip") ??
+        ""
+      ).toLowerCase();
+      if (
+        aria.includes("new") ||
+        aria.includes("create") ||
+        aria.includes("add") ||
+        aria.includes("note")
+      ) {
+        if (
+          !el.closest(".base-board-column") &&
+          !el.closest(".base-board-filter-bar")
+        ) {
+          el.classList.add("base-board-hidden");
+        }
+      }
+    });
   }
 
   private captureScrollState(): BoardScrollState {
