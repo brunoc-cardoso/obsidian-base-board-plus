@@ -147,12 +147,18 @@ export default class BaseBoardPlugin extends Plugin {
     const safeFolder = folder.replace(/[\\:*?"<>|]/g, "");
     const tasksFolder = `${safeFolder}/Tasks`;
 
-    // 1. Create folder structure
+    // 1. Create folder structure (including subfolders per default column)
     if (!vault.getAbstractFileByPath(safeFolder)) {
       await vault.createFolder(safeFolder);
     }
     if (!vault.getAbstractFileByPath(tasksFolder)) {
       await vault.createFolder(tasksFolder);
+    }
+    for (const col of ["To Do", "In Progress", "Done"]) {
+      const colFolder = `${tasksFolder}/${col}`;
+      if (!vault.getAbstractFileByPath(colFolder)) {
+        await vault.createFolder(colFolder);
+      }
     }
 
     // 2. Create the .base file
@@ -180,7 +186,7 @@ export default class BaseBoardPlugin extends Plugin {
 
     await vault.create(basePath, baseContent);
 
-    // 3. Create sample task files so the board isn't empty on first open
+    // 3. Create sample task files inside their respective column subfolder
     const sampleTasks = [
       {
         title: "Plan project",
@@ -216,7 +222,8 @@ export default class BaseBoardPlugin extends Plugin {
 
     for (const task of sampleTasks) {
       const safeName = sanitizeFilename(task.title);
-      const taskPath = `${tasksFolder}/${safeName}.md`;
+      const colFolder = `${tasksFolder}/${task.value}`;
+      const taskPath = `${colFolder}/${safeName}.md`;
       if (!vault.getAbstractFileByPath(taskPath)) {
         const tagsLine =
           task.tags.length > 0

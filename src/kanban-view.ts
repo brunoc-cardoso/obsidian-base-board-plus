@@ -10,6 +10,8 @@ import {
   setIcon,
   TFile,
   WorkspaceLeaf,
+  parseYaml,
+  Notice,
 } from "obsidian";
 import type BaseBoardPlugin from "./main";
 import { DragDropManager } from "./drag-drop";
@@ -18,6 +20,7 @@ import { CardManager } from "./card";
 import { Tags } from "./tags";
 import {
   compareOrderValues,
+  generateOrderKey,
   generateOrderKeys,
   isOrderKey,
   OrderValue,
@@ -32,6 +35,9 @@ import {
   CONFIG_KEY_WIP_LIMITS,
   CONFIG_KEY_COVER_PROPERTY,
   CONFIG_KEY_ADD_TO_TOP,
+  CONFIG_KEY_COLUMN_FOLDERS,
+  CONFIG_KEY_CARD_TEMPLATE,
+  sanitizeFilename,
 } from "./constants";
 
 interface BoardScrollState {
@@ -73,6 +79,7 @@ export class KanbanView extends BasesView implements HoverParent {
   /** Currently selected card file paths (for batch operations) */
   public selectedCards: Set<string> = new Set();
   public detailLeaf: WorkspaceLeaf | null = null;
+  public pendingCreations: Set<string> = new Set();
 
   constructor(
     controller: QueryController,
@@ -100,11 +107,60 @@ export class KanbanView extends BasesView implements HoverParent {
     });
   }
 
-  onload(): void {}
+  onload(): void {
+    this.registerEvent(
+      this.app.vault.on("create", (file) => {
+        if (file instanceof TFile && file.extension === "md") {
+          void this.handleVaultFileCreated(file);
+        }
+      }),
+    );
+  }
 
   onunload(): void {
     this.dragDropManager.destroy();
     if (this.renderTimer) window.clearTimeout(this.renderTimer);
+  }
+
+  public registerPendingCreation(title: string): void {
+    const safeTitle = sanitizeFilename(title);
+    this.pendingCreations.add(safeTitle);
+    this.pendingCreations.add(title);
+    window.setTimeout(() => {
+      this.pendingCreations.delete(safeTitle);
+      this.pendingCreations.delete(title);
+    }, 5000);
+  }
+
+  private async handleVaultFileCreated(file: TFile): Promise<void> {
+    const tasksFolder = this.getTasksFolder();
+    if (!tasksFolder || !file.path.startsWith(tasksFolder + "/")) {
+      return;
+    }
+
+    if (
+      this.pendingCreations.has(file.basename) ||
+      this.pendingCreations.has(sanitizeFilename(file.basename))
+    ) {
+      return;
+    }
+
+    await new Promise((resolve) => window.setTimeout(resolve, 100));
+
+    const orderedCols = this.getColumns();
+    const defaultColumn = orderedCols.length > 0 ? orderedCols[0] : "To Do";
+    const targetOrder = generateOrderKey(null, null);
+
+    await this.applyTemplateToCard(
+      file,
+      file.basename,
+      defaultColumn,
+      targetOrder,
+    );
+
+    if (this.isColumnFoldersEnabled()) {
+      await this.moveCardToColumnFolder(file, defaultColumn);
+    }
   }
 
   public focus(): void {
@@ -174,6 +230,19 @@ export class KanbanView extends BasesView implements HoverParent {
             displayName: "Add new cards to top",
             default: false,
           },
+          {
+            key: CONFIG_KEY_COLUMN_FOLDERS,
+            type: "toggle" as const,
+            displayName: "Move cards to column subfolders",
+            default: true,
+          },
+          {
+            key: CONFIG_KEY_CARD_TEMPLATE,
+            type: "text" as const,
+            displayName: "Card template path",
+            default: "",
+            placeholder: "Config/Examples/Task Default.md",
+          },
         ],
       },
     ];
@@ -181,6 +250,278 @@ export class KanbanView extends BasesView implements HoverParent {
 
   public isAddNewCardsToTop(): boolean {
     return !!this.config?.get(CONFIG_KEY_ADD_TO_TOP);
+  }
+
+  public isColumnFoldersEnabled(): boolean {
+    const val = this.config?.get(CONFIG_KEY_COLUMN_FOLDERS);
+    return val === undefined ? true : !!val;
+  }
+
+  public getTasksFolder(sampleFile?: TFile): string {
+    if (sampleFile) {
+      const parts = sampleFile.path.split("/");
+      const tasksIdx = parts.lastIndexOf("Tasks");
+      if (tasksIdx !== -1) {
+        return parts.slice(0, tasksIdx + 1).join("/");
+      }
+      if (parts.length > 2) {
+        return parts.slice(0, -2).join("/");
+      }
+      if (parts.length > 1) {
+        return parts.slice(0, -1).join("/");
+      }
+    }
+
+    const entries: BasesEntry[] = this.data?.data ?? [];
+    if (entries.length > 0) {
+      const firstPath = entries[0].file?.path ?? "";
+      const parts = firstPath.split("/");
+      const tasksIdx = parts.lastIndexOf("Tasks");
+      if (tasksIdx !== -1) {
+        return parts.slice(0, tasksIdx + 1).join("/");
+      }
+      if (parts.length > 2) {
+        return parts.slice(0, -2).join("/");
+      }
+      if (parts.length > 1) {
+        return parts.slice(0, -1).join("/");
+      }
+    }
+
+    const boardFolder = this.tags.getBoardFolder();
+    return boardFolder ? `${boardFolder}/Tasks` : "Tasks";
+  }
+
+  public async moveCardToColumnFolder(
+    file: TFile,
+    targetColumn: string,
+  ): Promise<void> {
+    const tasksFolder = this.getTasksFolder(file);
+    if (!tasksFolder) return;
+
+    const sanitizedCol = sanitizeFilename(targetColumn.trim());
+    const targetFolder =
+      targetColumn === NO_VALUE_COLUMN || !sanitizedCol
+        ? tasksFolder
+        : `${tasksFolder}/${sanitizedCol}`;
+
+    if (file.parent?.path === targetFolder) return;
+
+    const vault = this.app.vault;
+    if (!vault.getAbstractFileByPath(targetFolder)) {
+      await vault.createFolder(targetFolder);
+    }
+
+    let targetPath = `${targetFolder}/${file.name}`;
+    if (targetPath === file.path) return;
+
+    let counter = 1;
+    while (vault.getAbstractFileByPath(targetPath)) {
+      targetPath = `${targetFolder}/${file.basename} ${counter}.md`;
+      counter++;
+    }
+
+    await this.app.fileManager.renameFile(file, targetPath);
+  }
+
+  public async ensureCardInColumnFolder(
+    title: string,
+    columnName: string,
+  ): Promise<void> {
+    const safeTitle = sanitizeFilename(title);
+    const tasksFolder = this.getTasksFolder();
+
+    let file = this.app.vault.getAbstractFileByPath(
+      `${tasksFolder}/${safeTitle}.md`,
+    );
+    if (!file || !(file instanceof TFile)) {
+      file = this.app.vault.getAbstractFileByPath(`${tasksFolder}/${title}.md`);
+    }
+
+    if (file && file instanceof TFile) {
+      await this.moveCardToColumnFolder(file, columnName);
+    }
+  }
+
+  public findCardFileByTitle(title: string, columnName?: string): TFile | null {
+    const safeTitle = sanitizeFilename(title);
+    const tasksFolder = this.getTasksFolder();
+    const vault = this.app.vault;
+
+    if (columnName && columnName !== NO_VALUE_COLUMN) {
+      const sanitizedCol = sanitizeFilename(columnName.trim());
+      if (sanitizedCol) {
+        const colPath = `${tasksFolder}/${sanitizedCol}/${safeTitle}.md`;
+        let file = vault.getAbstractFileByPath(colPath);
+        if (file instanceof TFile) return file;
+
+        file = vault.getAbstractFileByPath(
+          `${tasksFolder}/${sanitizedCol}/${title}.md`,
+        );
+        if (file instanceof TFile) return file;
+      }
+    }
+
+    let file = vault.getAbstractFileByPath(`${tasksFolder}/${safeTitle}.md`);
+    if (file instanceof TFile) return file;
+
+    file = vault.getAbstractFileByPath(`${tasksFolder}/${title}.md`);
+    if (file instanceof TFile) return file;
+
+    const entries: BasesEntry[] = this.data?.data ?? [];
+    for (const entry of entries) {
+      if (
+        entry.file?.basename === title ||
+        entry.file?.basename === safeTitle
+      ) {
+        const found = vault.getAbstractFileByPath(entry.file.path);
+        if (found instanceof TFile) return found;
+      }
+    }
+
+    return null;
+  }
+
+  public getTemplateFile(): TFile | null {
+    const vault = this.app.vault;
+    const configuredPath = (
+      this.config?.get(CONFIG_KEY_CARD_TEMPLATE) as string | undefined
+    )?.trim();
+
+    if (configuredPath) {
+      let file = vault.getAbstractFileByPath(configuredPath);
+      if (file instanceof TFile) return file;
+
+      if (!configuredPath.endsWith(".md")) {
+        file = vault.getAbstractFileByPath(`${configuredPath}.md`);
+        if (file instanceof TFile) return file;
+      }
+
+      const boardFolder = this.tags.getBoardFolder();
+      if (boardFolder) {
+        file = vault.getAbstractFileByPath(`${boardFolder}/${configuredPath}`);
+        if (file instanceof TFile) return file;
+        if (!configuredPath.endsWith(".md")) {
+          file = vault.getAbstractFileByPath(
+            `${boardFolder}/${configuredPath}.md`,
+          );
+          if (file instanceof TFile) return file;
+        }
+      }
+    }
+
+    const boardFolder = this.tags.getBoardFolder();
+    const candidatePaths = boardFolder
+      ? [
+          `${boardFolder}/Config/Examples/Task Default.md`,
+          `${boardFolder}/Config/Task Default.md`,
+          `${boardFolder}/Task Default.md`,
+          `${boardFolder}/Config/Examples/Task Default`,
+          `${boardFolder}/Config/Task Default`,
+        ]
+      : [
+          "Config/Examples/Task Default.md",
+          "Config/Task Default.md",
+          "Task Default.md",
+        ];
+
+    for (const path of candidatePaths) {
+      const file = vault.getAbstractFileByPath(path);
+      if (file instanceof TFile) return file;
+    }
+
+    return null;
+  }
+
+  public async applyTemplateToCard(
+    cardFile: TFile,
+    title: string,
+    columnName: string,
+    targetOrder: OrderValue,
+  ): Promise<void> {
+    const templateFile = this.getTemplateFile();
+    if (!templateFile) return;
+
+    try {
+      const templateRaw = await this.app.vault.read(templateFile);
+
+      let templateFm: Record<string, unknown> = {};
+      let bodyText = templateRaw;
+
+      const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(
+        templateRaw,
+      );
+      if (match) {
+        try {
+          const parsed = parseYaml(match[1]) as unknown;
+          if (parsed && typeof parsed === "object") {
+            templateFm = parsed as Record<string, unknown>;
+          }
+        } catch {
+          // ignore parse error, keep body
+        }
+        bodyText = match[2];
+      }
+
+      const now = new Date();
+      const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
+      const dateStr = now.toISOString().split("T")[0];
+      const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
+
+      const processPlaceholders = (text: string): string => {
+        return text
+          .replace(/\{\{\s*title\s*\}\}/gi, title)
+          .replace(/\{\{\s*date\s*\}\}/gi, dateStr)
+          .replace(/\{\{\s*time\s*\}\}/gi, timeStr);
+      };
+
+      const processedBody = processPlaceholders(bodyText);
+      const groupByProp = this.getGroupByProperty();
+
+      await this.app.fileManager.processFrontMatter(
+        cardFile,
+        (fm: Record<string, unknown>) => {
+          for (const k of Object.keys(templateFm)) {
+            const v = templateFm[k];
+            if (typeof v === "string") {
+              fm[k] = processPlaceholders(v);
+            } else {
+              fm[k] = v;
+            }
+          }
+
+          if (groupByProp) {
+            if (columnName === NO_VALUE_COLUMN) {
+              delete fm[groupByProp];
+            } else {
+              fm[groupByProp] = columnName;
+            }
+          }
+          fm[ORDER_PROPERTY] = targetOrder;
+        },
+      );
+
+      const updatedCardRaw = await this.app.vault.read(cardFile);
+      const cardMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(
+        updatedCardRaw,
+      );
+      if (cardMatch) {
+        const fmHeader = updatedCardRaw.substring(
+          0,
+          updatedCardRaw.length - cardMatch[2].length,
+        );
+        const finalContent =
+          fmHeader +
+          (processedBody.startsWith("\n")
+            ? processedBody
+            : "\n" + processedBody);
+        await this.app.vault.modify(cardFile, finalContent);
+      } else {
+        await this.app.vault.modify(cardFile, processedBody);
+      }
+    } catch (err) {
+      new Notice(`Failed to apply template: ${String(err)}`);
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -682,21 +1023,25 @@ export class KanbanView extends BasesView implements HoverParent {
     try {
       await this.applyBatchUpdate(async () => {
         // 1. Move all cards to the target column (dragged card + any co-selected)
-        const movePromises = pathsToMove.map((fp) => {
+        const movePromises = pathsToMove.map(async (fp) => {
           const file = this.app.vault.getAbstractFileByPath(fp);
-          if (!file || !(file instanceof TFile)) return Promise.resolve();
+          if (!file || !(file instanceof TFile)) return;
           const sourceColumn = this.getCardSourceColumn(fp);
-          if (sourceColumn === targetColumnName) return Promise.resolve();
-          return this.app.fileManager.processFrontMatter(
-            file,
-            (fm: Record<string, unknown>) => {
-              if (targetColumnName === NO_VALUE_COLUMN) {
-                delete fm[groupByProp];
-              } else {
-                fm[groupByProp] = targetColumnName;
-              }
-            },
-          );
+          if (sourceColumn !== targetColumnName) {
+            await this.app.fileManager.processFrontMatter(
+              file,
+              (fm: Record<string, unknown>) => {
+                if (targetColumnName === NO_VALUE_COLUMN) {
+                  delete fm[groupByProp];
+                } else {
+                  fm[groupByProp] = targetColumnName;
+                }
+              },
+            );
+            if (this.isColumnFoldersEnabled()) {
+              await this.moveCardToColumnFolder(file, targetColumnName);
+            }
+          }
         });
         await Promise.all(movePromises);
 

@@ -28,6 +28,12 @@ export const CONFIG_KEY_COVER_PROPERTY = "cardCoverProperty";
 /** Key used by BasesViewConfig.set/get to persist if new cards should be added to the top in the .base file. */
 export const CONFIG_KEY_ADD_TO_TOP = "newCardsToTop";
 
+/** Key used by BasesViewConfig.set/get to persist if cards are organized in column subfolders in the .base file. */
+export const CONFIG_KEY_COLUMN_FOLDERS = "columnFolders";
+
+/** Key used by BasesViewConfig.set/get to persist card template file path in the .base file. */
+export const CONFIG_KEY_CARD_TEMPLATE = "cardTemplate";
+
 /**
  * Regex matching characters that are invalid in file/folder names.
  * Used when sanitizing user input before creating vault items.
