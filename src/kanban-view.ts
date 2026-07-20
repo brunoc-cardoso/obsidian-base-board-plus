@@ -10,8 +10,6 @@ import {
   setIcon,
   TFile,
   WorkspaceLeaf,
-  parseYaml,
-  Notice,
 } from "obsidian";
 import type BaseBoardPlugin from "./main";
 import { DragDropManager } from "./drag-drop";
@@ -31,7 +29,6 @@ import {
   CONFIG_KEY_COLUMNS,
   CONFIG_KEY_OPEN_BEHAVIOR,
   CONFIG_KEY_COLUMN_COLORS,
-  CONFIG_KEY_WIP_LIMITS,
   CONFIG_KEY_COVER_PROPERTY,
   CONFIG_KEY_ADD_TO_TOP,
   CONFIG_KEY_COLUMN_FOLDERS,
@@ -40,11 +37,16 @@ import {
   sanitizeFilename,
 } from "./constants";
 
-interface BoardScrollState {
-  boardLeft: number;
-  viewTop: number;
-  columnTops: Map<string, number>;
-}
+import { captureScrollState, restoreScrollState } from "./scroll-manager";
+import { getTasksFolder } from "./folder-utils";
+import {
+  getColumnName,
+  getWipLimit,
+  setWipLimit,
+  getColumns,
+  saveColumns,
+} from "./board-config";
+import { getTemplateFile, createCardFile } from "./card-factory";
 
 // ---------------------------------------------------------------------------
 //  Kanban View
@@ -215,59 +217,12 @@ export class KanbanView extends BasesView implements HoverParent {
   }
 
   public getTasksFolder(sampleFile?: TFile): string {
-    // 1. Config-first: use stored value (set by user or auto-detected on first render)
-    const stored = (
-      this.config?.get(CONFIG_KEY_TASKS_FOLDER) as string | undefined
-    )?.trim();
-    if (stored) return stored;
-
-    // 2. Heuristic detection then lazy-persist the result
-    return this.detectAndPersistTasksFolder(sampleFile);
-  }
-
-  private detectAndPersistTasksFolder(sampleFile?: TFile): string {
-    if (sampleFile) {
-      const parts = sampleFile.path.split("/");
-      const tasksIdx = parts.lastIndexOf("Tasks");
-      if (tasksIdx !== -1) {
-        return this.persistTasksFolder(parts.slice(0, tasksIdx + 1).join("/"));
-      }
-      if (parts.length > 2) {
-        return this.persistTasksFolder(parts.slice(0, -2).join("/"));
-      }
-      if (parts.length > 1) {
-        return this.persistTasksFolder(parts.slice(0, -1).join("/"));
-      }
-    }
-
-    const entries: BasesEntry[] = this.data?.data ?? [];
-    if (entries.length > 0) {
-      const firstPath = entries[0].file?.path ?? "";
-      const parts = firstPath.split("/");
-      const tasksIdx = parts.lastIndexOf("Tasks");
-      if (tasksIdx !== -1) {
-        return this.persistTasksFolder(parts.slice(0, tasksIdx + 1).join("/"));
-      }
-      if (parts.length > 2) {
-        return this.persistTasksFolder(parts.slice(0, -2).join("/"));
-      }
-      if (parts.length > 1) {
-        return this.persistTasksFolder(parts.slice(0, -1).join("/"));
-      }
-    }
-
-    const boardFolder = this.tags.getBoardFolder();
-    return this.persistTasksFolder(
-      boardFolder ? `${boardFolder}/Tasks` : "Tasks",
+    return getTasksFolder(
+      this.app,
+      this.data?.data ?? [],
+      this.config,
+      sampleFile,
     );
-  }
-
-  /** Store the detected tasks folder in view config for future calls. */
-  private persistTasksFolder(folder: string): string {
-    if (folder && this.config) {
-      this.config.set(CONFIG_KEY_TASKS_FOLDER, folder);
-    }
-    return folder;
   }
 
   public async moveCardToColumnFolder(
@@ -303,171 +258,31 @@ export class KanbanView extends BasesView implements HoverParent {
   }
 
   public getTemplateFile(): TFile | null {
-    const vault = this.app.vault;
-    const configuredPath = (
-      this.config?.get(CONFIG_KEY_CARD_TEMPLATE) as string | undefined
-    )?.trim();
-
-    if (configuredPath) {
-      let file = vault.getAbstractFileByPath(configuredPath);
-      if (file instanceof TFile) return file;
-
-      if (!configuredPath.endsWith(".md")) {
-        file = vault.getAbstractFileByPath(`${configuredPath}.md`);
-        if (file instanceof TFile) return file;
-      }
-
-      const boardFolder = this.tags.getBoardFolder();
-      if (boardFolder) {
-        file = vault.getAbstractFileByPath(`${boardFolder}/${configuredPath}`);
-        if (file instanceof TFile) return file;
-        if (!configuredPath.endsWith(".md")) {
-          file = vault.getAbstractFileByPath(
-            `${boardFolder}/${configuredPath}.md`,
-          );
-          if (file instanceof TFile) return file;
-        }
-      }
-    }
-
     const boardFolder = this.tags.getBoardFolder();
-    const candidatePaths = boardFolder
-      ? [
-          `${boardFolder}/Config/Examples/Task Default.md`,
-          `${boardFolder}/Config/Task Default.md`,
-          `${boardFolder}/Task Default.md`,
-          `${boardFolder}/Config/Examples/Task Default`,
-          `${boardFolder}/Config/Task Default`,
-        ]
-      : [
-          "Config/Examples/Task Default.md",
-          "Config/Task Default.md",
-          "Task Default.md",
-        ];
-
-    for (const path of candidatePaths) {
-      const file = vault.getAbstractFileByPath(path);
-      if (file instanceof TFile) return file;
-    }
-
-    return null;
+    return getTemplateFile(this.app, this.config, boardFolder);
   }
 
-  /**
-   * Create a new card note directly in the vault, without opening any modal.
-   *
-   * Strategy:
-   *  1. Read the template (if configured) to extract body text and frontmatter
-   *     keys with their placeholder-resolved values.
-   *  2. Create the file with the template body text via vault.create() —
-   *     no manual YAML serialization.
-   *  3. Write all frontmatter (board props + template props) via Obsidian's
-   *     processFrontMatter(), which handles correct YAML encoding for all
-   *     value types (strings with special chars, arrays, booleans, dates…).
-   *
-   * Returns the created TFile, or null on failure.
-   */
   public async createCardFile(
     title: string,
     columnName: string,
     targetOrder: OrderValue,
   ): Promise<TFile | null> {
-    const groupByProp = this.getGroupByProperty();
-    if (!groupByProp) {
-      new Notice("Cannot create card: no group by property configured.");
-      return null;
-    }
-
-    // --- Build destination path ---
-    const safeTitle = sanitizeFilename(title);
+    const boardFolder = this.tags.getBoardFolder();
     const tasksFolder = this.getTasksFolder();
+    const isColumnFoldersEnabled = this.isColumnFoldersEnabled();
+    const groupByProp = this.getGroupByProperty();
 
-    let destFolder = tasksFolder;
-    if (this.isColumnFoldersEnabled() && columnName !== NO_VALUE_COLUMN) {
-      const sanitizedCol = sanitizeFilename(columnName.trim());
-      if (sanitizedCol) {
-        destFolder = `${tasksFolder}/${sanitizedCol}`;
-      }
-    }
-
-    const vault = this.app.vault;
-    if (!vault.getAbstractFileByPath(destFolder)) {
-      await vault.createFolder(destFolder);
-    }
-
-    let destPath = `${destFolder}/${safeTitle}.md`;
-    let counter = 1;
-    while (vault.getAbstractFileByPath(destPath)) {
-      destPath = `${destFolder}/${safeTitle} ${counter}.md`;
-      counter++;
-    }
-
-    // --- Template: read body text and frontmatter keys ---
-    const now = new Date();
-    const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
-    const dateStr = now.toISOString().split("T")[0];
-    const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-    const processPlaceholders = (text: string): string =>
-      text
-        .replace(/\{\{\s*title\s*\}\}/gi, title)
-        .replace(/\{\{\s*date\s*\}\}/gi, dateStr)
-        .replace(/\{\{\s*time\s*\}\}/gi, timeStr);
-
-    let templateFm: Record<string, unknown> = {};
-    let bodyText = "";
-
-    const templateFile = this.getTemplateFile();
-    if (templateFile) {
-      try {
-        const raw = await vault.read(templateFile);
-        const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(raw);
-        if (match) {
-          try {
-            const parsed = parseYaml(match[1]) as unknown;
-            if (parsed && typeof parsed === "object") {
-              templateFm = parsed as Record<string, unknown>;
-            }
-          } catch {
-            // ignore yaml parse error
-          }
-          bodyText = processPlaceholders(match[2]);
-        } else {
-          bodyText = processPlaceholders(raw);
-        }
-      } catch {
-        // ignore template read error
-      }
-    }
-
-    // --- Create file with template body (no manual YAML) ---
-    try {
-      const file = await vault.create(destPath, bodyText);
-
-      // --- Write all frontmatter safely via Obsidian's API ---
-      await this.app.fileManager.processFrontMatter(
-        file,
-        (fm: Record<string, unknown>) => {
-          // Board-required properties (take precedence over template)
-          if (columnName !== NO_VALUE_COLUMN) {
-            fm[groupByProp] = columnName;
-          }
-          fm[ORDER_PROPERTY] = targetOrder;
-
-          // Template properties (skipping board-controlled keys)
-          for (const k of Object.keys(templateFm)) {
-            if (k === groupByProp || k === ORDER_PROPERTY) continue;
-            const v = templateFm[k];
-            fm[k] = typeof v === "string" ? processPlaceholders(v) : v;
-          }
-        },
-      );
-
-      return file;
-    } catch (err) {
-      new Notice(`Failed to create card: ${String(err)}`);
-      return null;
-    }
+    return createCardFile(
+      this.app,
+      this.config,
+      title,
+      columnName,
+      targetOrder,
+      boardFolder,
+      tasksFolder,
+      isColumnFoldersEnabled,
+      groupByProp,
+    );
   }
 
   // ---------------------------------------------------------------------------
@@ -590,46 +405,17 @@ export class KanbanView extends BasesView implements HoverParent {
   //  WIP Limits
   // ---------------------------------------------------------------------------
 
-  public getWipLimits(): Record<string, number> {
-    const raw = this.config?.get(CONFIG_KEY_WIP_LIMITS);
-    return raw && typeof raw === "object"
-      ? (raw as Record<string, number>)
-      : {};
-  }
-
   public getWipLimit(columnName: string): number | null {
-    const limits = this.getWipLimits();
-    const val = limits[columnName];
-    return typeof val === "number" && val > 0 ? val : null;
+    return getWipLimit(this.config, columnName);
   }
 
   public setWipLimit(columnName: string, limit: number | null): void {
-    const limits = this.getWipLimits();
-    if (limit !== null && limit > 0) {
-      limits[columnName] = limit;
-    } else {
-      delete limits[columnName];
-    }
-    this.config?.set(CONFIG_KEY_WIP_LIMITS, limits);
+    setWipLimit(this.config, columnName, limit);
     this.scheduleRender();
   }
 
-  private getColumnName(key: unknown): string {
-    if (key === undefined || key === null || key instanceof NullValue) {
-      return NO_VALUE_COLUMN;
-    }
-    if (typeof key === "object" && key !== null) {
-      if ("value" in key) {
-        const val = (key as Record<string, unknown>).value;
-        return String(val);
-      }
-      // Bases group-key objects expose the column name via toString()
-      // eslint-disable-next-line @typescript-eslint/no-base-to-string -- Bases-controlled object with custom toString
-      return String(key);
-    }
-    if (typeof key === "string") return key;
-    if (typeof key === "number" || typeof key === "boolean") return String(key);
-    return "";
+  public getColumnName(key: unknown): string {
+    return getColumnName(key);
   }
 
   /**
@@ -718,38 +504,7 @@ export class KanbanView extends BasesView implements HoverParent {
    * are appended at the end so they are never silently hidden.
    */
   public getColumns(): string[] {
-    // 1. Try .base file config first (new preferred storage)
-    const fromConfig = this.config?.get(CONFIG_KEY_COLUMNS) as
-      string[] | undefined;
-
-    // 2. Fallback: legacy plugin data.json
-    const fromPlugin = this.plugin.getColumnConfig(this.getBaseId());
-
-    const rawStored = fromConfig?.length
-      ? fromConfig
-      : fromPlugin?.columns?.length
-        ? fromPlugin.columns
-        : null;
-
-    const stored = rawStored
-      ? rawStored.map((col) => (col === "" ? NO_VALUE_COLUMN : col))
-      : null;
-
-    const dataColumns = this.currentGroups.map((g) =>
-      this.getColumnName(g.key),
-    );
-
-    if (stored && stored.length > 0) {
-      const result = [...stored];
-      for (const col of dataColumns) {
-        if (!result.includes(col)) {
-          result.push(col);
-        }
-      }
-      return result;
-    }
-
-    return dataColumns;
+    return getColumns(this.config, this.currentGroups);
   }
 
   private getGroupForColumn(columnName: string): BasesEntryGroup | null {
@@ -770,7 +525,7 @@ export class KanbanView extends BasesView implements HoverParent {
 
   public render(): void {
     this.selectedCards.clear();
-    const scrollState = this.captureScrollState();
+    const scrollState = captureScrollState(this.containerEl, this.scrollEl);
 
     // Index stable DOM nodes before rebuilding the lightweight board shell.
     // Columns are detached as complete subtrees, preserving their card lists,
@@ -807,9 +562,7 @@ export class KanbanView extends BasesView implements HoverParent {
     // If the board has configured columns (from .base or data.json) but
     // no cards exist yet, render the empty columns so users can see and
     // add cards instead of showing an opaque placeholder.
-    const stored =
-      (this.config?.get(CONFIG_KEY_COLUMNS) as string[] | undefined) ??
-      this.plugin.getColumnConfig(this.getBaseId())?.columns;
+    const stored = this.config?.get(CONFIG_KEY_COLUMNS) as string[] | undefined;
     const hasStoredColumns = stored && stored.length > 0;
     const shouldShowPlaceholder =
       !hasGroupBy && groupedData.length <= 1 && !hasStoredColumns;
@@ -829,7 +582,7 @@ export class KanbanView extends BasesView implements HoverParent {
     }
 
     this.currentGroups = groupedData;
-    const columns = this.getColumns();
+    const orderedCols = getColumns(this.config, this.currentGroups);
     const boardEl = this.containerEl.createDiv({ cls: "base-board-board" });
 
     // Only animate cards on the very first render
@@ -840,7 +593,7 @@ export class KanbanView extends BasesView implements HoverParent {
 
     this.tags.renderFilterBar(this.containerEl);
 
-    columns.forEach((columnName, idx) => {
+    orderedCols.forEach((columnName, idx) => {
       const group = this.getGroupForColumn(columnName);
       this.columnManager.renderColumn(
         boardEl,
@@ -853,50 +606,7 @@ export class KanbanView extends BasesView implements HoverParent {
 
     this.columnManager.renderAddColumnButton(boardEl);
     this.dragDropManager.initBoard(boardEl);
-    this.restoreScrollState(boardEl, scrollState);
-  }
-
-  private captureScrollState(): BoardScrollState {
-    const boardEl =
-      this.containerEl.querySelector<HTMLElement>(".base-board-board");
-    const columnTops = new Map<string, number>();
-
-    boardEl
-      ?.querySelectorAll<HTMLElement>(".base-board-column")
-      .forEach((columnEl) => {
-        const name = columnEl.dataset.columnName;
-        const cardsEl =
-          columnEl.querySelector<HTMLElement>(".base-board-cards");
-        if (name && cardsEl) columnTops.set(name, cardsEl.scrollTop);
-      });
-
-    return {
-      boardLeft: boardEl?.scrollLeft ?? 0,
-      viewTop: this.scrollEl.scrollTop,
-      columnTops,
-    };
-  }
-
-  private restoreScrollState(
-    boardEl: HTMLElement,
-    state: BoardScrollState,
-  ): void {
-    // All columns are attached, so these assignments restore against the final
-    // layout and cannot race a deferred callback from an earlier render.
-    boardEl.scrollLeft = state.boardLeft;
-    this.scrollEl.scrollTop = state.viewTop;
-
-    boardEl
-      .querySelectorAll<HTMLElement>(".base-board-column")
-      .forEach((columnEl) => {
-        const name = columnEl.dataset.columnName;
-        const cardsEl =
-          columnEl.querySelector<HTMLElement>(".base-board-cards");
-        const scrollTop = name ? state.columnTops.get(name) : undefined;
-        if (cardsEl && scrollTop !== undefined) {
-          cardsEl.scrollTop = scrollTop;
-        }
-      });
+    restoreScrollState(boardEl, this.scrollEl, scrollState);
   }
 
   // ---------------------------------------------------------------------------
@@ -916,12 +626,7 @@ export class KanbanView extends BasesView implements HoverParent {
    *  - Plugin data.json (legacy, kept so older board setups still work)
    */
   public saveColumns(columns: string[]): void {
-    // Primary: persist in .base file via the official config API
-    const toSave = columns.map((col) => (col === NO_VALUE_COLUMN ? "" : col));
-    this.config?.set(CONFIG_KEY_COLUMNS, toSave);
-
-    // Legacy fallback: also write to plugin data.json
-    void this.plugin.saveColumnConfig(this.getBaseId(), { columns });
+    saveColumns(this.config, columns);
   }
 
   // ---------------------------------------------------------------------------
