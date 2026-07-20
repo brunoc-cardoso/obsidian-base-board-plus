@@ -34,6 +34,9 @@ export const CONFIG_KEY_COLUMN_FOLDERS = "columnFolders";
 /** Key used by BasesViewConfig.set/get to persist card template file path in the .base file. */
 export const CONFIG_KEY_CARD_TEMPLATE = "cardTemplate";
 
+/** Key used by BasesViewConfig.set/get to persist the resolved tasks folder path in the .base file. */
+export const CONFIG_KEY_TASKS_FOLDER = "tasksFolder";
+
 /**
  * Regex matching characters that are invalid in file/folder names.
  * Used when sanitizing user input before creating vault items.

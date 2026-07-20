@@ -20,7 +20,6 @@ import { CardManager } from "./card";
 import { Tags } from "./tags";
 import {
   compareOrderValues,
-  generateOrderKey,
   generateOrderKeys,
   isOrderKey,
   OrderValue,
@@ -37,6 +36,7 @@ import {
   CONFIG_KEY_ADD_TO_TOP,
   CONFIG_KEY_COLUMN_FOLDERS,
   CONFIG_KEY_CARD_TEMPLATE,
+  CONFIG_KEY_TASKS_FOLDER,
   sanitizeFilename,
 } from "./constants";
 
@@ -79,7 +79,6 @@ export class KanbanView extends BasesView implements HoverParent {
   /** Currently selected card file paths (for batch operations) */
   public selectedCards: Set<string> = new Set();
   public detailLeaf: WorkspaceLeaf | null = null;
-  public pendingCreations: Set<string> = new Set();
 
   constructor(
     controller: QueryController,
@@ -107,60 +106,11 @@ export class KanbanView extends BasesView implements HoverParent {
     });
   }
 
-  onload(): void {
-    this.registerEvent(
-      this.app.vault.on("create", (file) => {
-        if (file instanceof TFile && file.extension === "md") {
-          void this.handleVaultFileCreated(file);
-        }
-      }),
-    );
-  }
+  onload(): void {}
 
   onunload(): void {
     this.dragDropManager.destroy();
     if (this.renderTimer) window.clearTimeout(this.renderTimer);
-  }
-
-  public registerPendingCreation(title: string): void {
-    const safeTitle = sanitizeFilename(title);
-    this.pendingCreations.add(safeTitle);
-    this.pendingCreations.add(title);
-    window.setTimeout(() => {
-      this.pendingCreations.delete(safeTitle);
-      this.pendingCreations.delete(title);
-    }, 5000);
-  }
-
-  private async handleVaultFileCreated(file: TFile): Promise<void> {
-    const tasksFolder = this.getTasksFolder();
-    if (!tasksFolder || !file.path.startsWith(tasksFolder + "/")) {
-      return;
-    }
-
-    if (
-      this.pendingCreations.has(file.basename) ||
-      this.pendingCreations.has(sanitizeFilename(file.basename))
-    ) {
-      return;
-    }
-
-    await new Promise((resolve) => window.setTimeout(resolve, 100));
-
-    const orderedCols = this.getColumns();
-    const defaultColumn = orderedCols.length > 0 ? orderedCols[0] : "To Do";
-    const targetOrder = generateOrderKey(null, null);
-
-    await this.applyTemplateToCard(
-      file,
-      file.basename,
-      defaultColumn,
-      targetOrder,
-    );
-
-    if (this.isColumnFoldersEnabled()) {
-      await this.moveCardToColumnFolder(file, defaultColumn);
-    }
   }
 
   public focus(): void {
@@ -243,6 +193,13 @@ export class KanbanView extends BasesView implements HoverParent {
             default: "",
             placeholder: "Config/Examples/Task Default.md",
           },
+          {
+            key: CONFIG_KEY_TASKS_FOLDER,
+            type: "text" as const,
+            displayName: "Tasks folder path",
+            default: "",
+            placeholder: "Boards/MyBoard/Tasks",
+          },
         ],
       },
     ];
@@ -258,17 +215,28 @@ export class KanbanView extends BasesView implements HoverParent {
   }
 
   public getTasksFolder(sampleFile?: TFile): string {
+    // 1. Config-first: use stored value (set by user or auto-detected on first render)
+    const stored = (
+      this.config?.get(CONFIG_KEY_TASKS_FOLDER) as string | undefined
+    )?.trim();
+    if (stored) return stored;
+
+    // 2. Heuristic detection then lazy-persist the result
+    return this.detectAndPersistTasksFolder(sampleFile);
+  }
+
+  private detectAndPersistTasksFolder(sampleFile?: TFile): string {
     if (sampleFile) {
       const parts = sampleFile.path.split("/");
       const tasksIdx = parts.lastIndexOf("Tasks");
       if (tasksIdx !== -1) {
-        return parts.slice(0, tasksIdx + 1).join("/");
+        return this.persistTasksFolder(parts.slice(0, tasksIdx + 1).join("/"));
       }
       if (parts.length > 2) {
-        return parts.slice(0, -2).join("/");
+        return this.persistTasksFolder(parts.slice(0, -2).join("/"));
       }
       if (parts.length > 1) {
-        return parts.slice(0, -1).join("/");
+        return this.persistTasksFolder(parts.slice(0, -1).join("/"));
       }
     }
 
@@ -278,18 +246,28 @@ export class KanbanView extends BasesView implements HoverParent {
       const parts = firstPath.split("/");
       const tasksIdx = parts.lastIndexOf("Tasks");
       if (tasksIdx !== -1) {
-        return parts.slice(0, tasksIdx + 1).join("/");
+        return this.persistTasksFolder(parts.slice(0, tasksIdx + 1).join("/"));
       }
       if (parts.length > 2) {
-        return parts.slice(0, -2).join("/");
+        return this.persistTasksFolder(parts.slice(0, -2).join("/"));
       }
       if (parts.length > 1) {
-        return parts.slice(0, -1).join("/");
+        return this.persistTasksFolder(parts.slice(0, -1).join("/"));
       }
     }
 
     const boardFolder = this.tags.getBoardFolder();
-    return boardFolder ? `${boardFolder}/Tasks` : "Tasks";
+    return this.persistTasksFolder(
+      boardFolder ? `${boardFolder}/Tasks` : "Tasks",
+    );
+  }
+
+  /** Store the detected tasks folder in view config for future calls. */
+  private persistTasksFolder(folder: string): string {
+    if (folder && this.config) {
+      this.config.set(CONFIG_KEY_TASKS_FOLDER, folder);
+    }
+    return folder;
   }
 
   public async moveCardToColumnFolder(
@@ -322,64 +300,6 @@ export class KanbanView extends BasesView implements HoverParent {
     }
 
     await this.app.fileManager.renameFile(file, targetPath);
-  }
-
-  public async ensureCardInColumnFolder(
-    title: string,
-    columnName: string,
-  ): Promise<void> {
-    const safeTitle = sanitizeFilename(title);
-    const tasksFolder = this.getTasksFolder();
-
-    let file = this.app.vault.getAbstractFileByPath(
-      `${tasksFolder}/${safeTitle}.md`,
-    );
-    if (!file || !(file instanceof TFile)) {
-      file = this.app.vault.getAbstractFileByPath(`${tasksFolder}/${title}.md`);
-    }
-
-    if (file && file instanceof TFile) {
-      await this.moveCardToColumnFolder(file, columnName);
-    }
-  }
-
-  public findCardFileByTitle(title: string, columnName?: string): TFile | null {
-    const safeTitle = sanitizeFilename(title);
-    const tasksFolder = this.getTasksFolder();
-    const vault = this.app.vault;
-
-    if (columnName && columnName !== NO_VALUE_COLUMN) {
-      const sanitizedCol = sanitizeFilename(columnName.trim());
-      if (sanitizedCol) {
-        const colPath = `${tasksFolder}/${sanitizedCol}/${safeTitle}.md`;
-        let file = vault.getAbstractFileByPath(colPath);
-        if (file instanceof TFile) return file;
-
-        file = vault.getAbstractFileByPath(
-          `${tasksFolder}/${sanitizedCol}/${title}.md`,
-        );
-        if (file instanceof TFile) return file;
-      }
-    }
-
-    let file = vault.getAbstractFileByPath(`${tasksFolder}/${safeTitle}.md`);
-    if (file instanceof TFile) return file;
-
-    file = vault.getAbstractFileByPath(`${tasksFolder}/${title}.md`);
-    if (file instanceof TFile) return file;
-
-    const entries: BasesEntry[] = this.data?.data ?? [];
-    for (const entry of entries) {
-      if (
-        entry.file?.basename === title ||
-        entry.file?.basename === safeTitle
-      ) {
-        const found = vault.getAbstractFileByPath(entry.file.path);
-        if (found instanceof TFile) return found;
-      }
-    }
-
-    return null;
   }
 
   public getTemplateFile(): TFile | null {
@@ -435,9 +355,15 @@ export class KanbanView extends BasesView implements HoverParent {
 
   /**
    * Create a new card note directly in the vault, without opening any modal.
-   * Builds the initial frontmatter and template body in-memory and writes
-   * the file in a single vault.create() call so Obsidian Bases never gets
-   * a chance to show its "new note" dialog.
+   *
+   * Strategy:
+   *  1. Read the template (if configured) to extract body text and frontmatter
+   *     keys with their placeholder-resolved values.
+   *  2. Create the file with the template body text via vault.create() —
+   *     no manual YAML serialization.
+   *  3. Write all frontmatter (board props + template props) via Obsidian's
+   *     processFrontMatter(), which handles correct YAML encoding for all
+   *     value types (strings with special chars, arrays, booleans, dates…).
    *
    * Returns the created TFile, or null on failure.
    */
@@ -476,7 +402,7 @@ export class KanbanView extends BasesView implements HoverParent {
       counter++;
     }
 
-    // --- Build frontmatter ---
+    // --- Template: read body text and frontmatter keys ---
     const now = new Date();
     const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
     const dateStr = now.toISOString().split("T")[0];
@@ -488,15 +414,9 @@ export class KanbanView extends BasesView implements HoverParent {
         .replace(/\{\{\s*date\s*\}\}/gi, dateStr)
         .replace(/\{\{\s*time\s*\}\}/gi, timeStr);
 
-    // Start with required board properties
-    const fm: Record<string, unknown> = {
-      [groupByProp]: columnName === NO_VALUE_COLUMN ? undefined : columnName,
-      [ORDER_PROPERTY]: targetOrder,
-    };
-    if (columnName === NO_VALUE_COLUMN) delete fm[groupByProp];
-
-    // Merge template frontmatter if a template is configured
+    let templateFm: Record<string, unknown> = {};
     let bodyText = "";
+
     const templateFile = this.getTemplateFile();
     if (templateFile) {
       try {
@@ -506,12 +426,7 @@ export class KanbanView extends BasesView implements HoverParent {
           try {
             const parsed = parseYaml(match[1]) as unknown;
             if (parsed && typeof parsed === "object") {
-              const templateFm = parsed as Record<string, unknown>;
-              for (const k of Object.keys(templateFm)) {
-                if (k === groupByProp || k === ORDER_PROPERTY) continue;
-                const v = templateFm[k];
-                fm[k] = typeof v === "string" ? processPlaceholders(v) : v;
-              }
+              templateFm = parsed as Record<string, unknown>;
             }
           } catch {
             // ignore yaml parse error
@@ -525,122 +440,33 @@ export class KanbanView extends BasesView implements HoverParent {
       }
     }
 
-    // --- Serialise frontmatter ---
-    const fmLines: string[] = ["---"];
-    for (const k of Object.keys(fm)) {
-      const v = fm[k];
-      if (v === undefined) continue;
-      if (typeof v === "string") {
-        fmLines.push(`${k}: "${v.replace(/"/g, '\\"')}"`);
-      } else if (Array.isArray(v)) {
-        fmLines.push(`${k}:`);
-        for (const item of v) fmLines.push(`  - ${String(item)}`);
-      } else {
-        fmLines.push(`${k}: ${JSON.stringify(v)}`);
-      }
-    }
-    fmLines.push("---");
-
-    const fileContent = fmLines.join("\n") + "\n" + bodyText;
-
-    // --- Create the file ---
+    // --- Create file with template body (no manual YAML) ---
     try {
-      this.registerPendingCreation(title);
-      const file = await vault.create(destPath, fileContent);
+      const file = await vault.create(destPath, bodyText);
+
+      // --- Write all frontmatter safely via Obsidian's API ---
+      await this.app.fileManager.processFrontMatter(
+        file,
+        (fm: Record<string, unknown>) => {
+          // Board-required properties (take precedence over template)
+          if (columnName !== NO_VALUE_COLUMN) {
+            fm[groupByProp] = columnName;
+          }
+          fm[ORDER_PROPERTY] = targetOrder;
+
+          // Template properties (skipping board-controlled keys)
+          for (const k of Object.keys(templateFm)) {
+            if (k === groupByProp || k === ORDER_PROPERTY) continue;
+            const v = templateFm[k];
+            fm[k] = typeof v === "string" ? processPlaceholders(v) : v;
+          }
+        },
+      );
+
       return file;
     } catch (err) {
       new Notice(`Failed to create card: ${String(err)}`);
       return null;
-    }
-  }
-  public async applyTemplateToCard(
-    cardFile: TFile,
-    title: string,
-    columnName: string,
-    targetOrder: OrderValue,
-  ): Promise<void> {
-    const templateFile = this.getTemplateFile();
-    if (!templateFile) return;
-
-    try {
-      const templateRaw = await this.app.vault.read(templateFile);
-
-      let templateFm: Record<string, unknown> = {};
-      let bodyText = templateRaw;
-
-      const match = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(
-        templateRaw,
-      );
-      if (match) {
-        try {
-          const parsed = parseYaml(match[1]) as unknown;
-          if (parsed && typeof parsed === "object") {
-            templateFm = parsed as Record<string, unknown>;
-          }
-        } catch {
-          // ignore parse error, keep body
-        }
-        bodyText = match[2];
-      }
-
-      const now = new Date();
-      const pad = (n: number) => (n < 10 ? "0" + n : "" + n);
-      const dateStr = now.toISOString().split("T")[0];
-      const timeStr = `${pad(now.getHours())}:${pad(now.getMinutes())}`;
-
-      const processPlaceholders = (text: string): string => {
-        return text
-          .replace(/\{\{\s*title\s*\}\}/gi, title)
-          .replace(/\{\{\s*date\s*\}\}/gi, dateStr)
-          .replace(/\{\{\s*time\s*\}\}/gi, timeStr);
-      };
-
-      const processedBody = processPlaceholders(bodyText);
-      const groupByProp = this.getGroupByProperty();
-
-      await this.app.fileManager.processFrontMatter(
-        cardFile,
-        (fm: Record<string, unknown>) => {
-          for (const k of Object.keys(templateFm)) {
-            const v = templateFm[k];
-            if (typeof v === "string") {
-              fm[k] = processPlaceholders(v);
-            } else {
-              fm[k] = v;
-            }
-          }
-
-          if (groupByProp) {
-            if (columnName === NO_VALUE_COLUMN) {
-              delete fm[groupByProp];
-            } else {
-              fm[groupByProp] = columnName;
-            }
-          }
-          fm[ORDER_PROPERTY] = targetOrder;
-        },
-      );
-
-      const updatedCardRaw = await this.app.vault.read(cardFile);
-      const cardMatch = /^---\r?\n([\s\S]*?)\r?\n---\r?\n?([\s\S]*)$/.exec(
-        updatedCardRaw,
-      );
-      if (cardMatch) {
-        const fmHeader = updatedCardRaw.substring(
-          0,
-          updatedCardRaw.length - cardMatch[2].length,
-        );
-        const finalContent =
-          fmHeader +
-          (processedBody.startsWith("\n")
-            ? processedBody
-            : "\n" + processedBody);
-        await this.app.vault.modify(cardFile, finalContent);
-      } else {
-        await this.app.vault.modify(cardFile, processedBody);
-      }
-    } catch (err) {
-      new Notice(`Failed to apply template: ${String(err)}`);
     }
   }
 
