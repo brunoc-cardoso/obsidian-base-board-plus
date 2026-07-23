@@ -18,6 +18,7 @@ export class AttachmentManager {
           editor: Editor,
           info: MarkdownView | MarkdownFileInfo,
         ) => {
+          if (evt.defaultPrevented) return;
           void this.handlePasteOrDrop(evt, editor, info);
         },
       ),
@@ -31,6 +32,7 @@ export class AttachmentManager {
           editor: Editor,
           info: MarkdownView | MarkdownFileInfo,
         ) => {
+          if (evt.defaultPrevented) return;
           void this.handlePasteOrDrop(evt, editor, info);
         },
       ),

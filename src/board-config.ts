@@ -102,8 +102,9 @@ export function getTaskStorageMode(
   const mode = config?.get(CONFIG_KEY_TASK_STORAGE_MODE);
   if (mode === "file") return "file";
 
-  const directMode = (config as { taskStorageMode?: unknown } | null | undefined)
-    ?.taskStorageMode;
+  const directMode = (
+    config as { taskStorageMode?: unknown } | null | undefined
+  )?.taskStorageMode;
   if (directMode === "file") return "file";
 
   return "folder";
@@ -115,8 +116,7 @@ export function getAttachmentSubfolder(
 ): string {
   const ext = extension.toLowerCase().replace(/^\./, "");
   const customRules = config?.get(CONFIG_KEY_ATTACHMENT_RULES) as
-    | Record<string, string>
-    | undefined;
+    Record<string, string> | undefined;
 
   if (customRules && customRules[ext]) {
     return customRules[ext];
@@ -126,4 +126,3 @@ export function getAttachmentSubfolder(
   }
   return "attachments";
 }
-

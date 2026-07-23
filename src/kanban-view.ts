@@ -371,17 +371,28 @@ export class KanbanView extends BasesView implements HoverParent {
     if (typeof groupBy === "string") {
       return groupBy.startsWith("note.") ? groupBy.slice(5) : groupBy;
     }
-    if (groupBy && typeof groupBy === "object" && "property" in groupBy && typeof groupBy.property === "string") {
+    if (
+      groupBy &&
+      typeof groupBy === "object" &&
+      "property" in groupBy &&
+      typeof groupBy.property === "string"
+    ) {
       const raw: string = groupBy.property;
       return raw.startsWith("note.") ? raw.slice(5) : raw;
     }
 
     // 2. Fallback: try the custom-options API
-    const fromGet = cfg?.get?.("groupBy") as { property?: string } | string | undefined;
+    const fromGet = cfg?.get?.("groupBy") as
+      { property?: string } | string | undefined;
     if (typeof fromGet === "string") {
       return fromGet.startsWith("note.") ? fromGet.slice(5) : fromGet;
     }
-    if (fromGet && typeof fromGet === "object" && "property" in fromGet && typeof fromGet.property === "string") {
+    if (
+      fromGet &&
+      typeof fromGet === "object" &&
+      "property" in fromGet &&
+      typeof fromGet.property === "string"
+    ) {
       const raw: string = fromGet.property;
       return raw.startsWith("note.") ? raw.slice(5) : raw;
     }

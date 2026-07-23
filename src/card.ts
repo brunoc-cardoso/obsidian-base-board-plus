@@ -571,15 +571,17 @@ export class CardManager {
           if (taskFolder) {
             const newNotePath = `${taskFolder.path}/${safeName}.md`;
             const parentPath = taskFolder.parent?.path;
-            const newFolderPath = parentPath ? `${parentPath}/${safeName}` : safeName;
+            const newFolderPath = parentPath
+              ? `${parentPath}/${safeName}`
+              : safeName;
 
             await this.view.app.fileManager.renameFile(file, newNotePath);
-            await this.view.app.fileManager.renameFile(taskFolder, newFolderPath);
-          } else {
-            const newPath = file.path.replace(
-              /[^/]+\.md$/,
-              `${safeName}.md`,
+            await this.view.app.fileManager.renameFile(
+              taskFolder,
+              newFolderPath,
             );
+          } else {
+            const newPath = file.path.replace(/[^/]+\.md$/, `${safeName}.md`);
             await this.view.app.fileManager.renameFile(file, newPath);
           }
         } catch (err) {

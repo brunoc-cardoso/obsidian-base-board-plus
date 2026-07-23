@@ -127,4 +127,3 @@ export function getTaskFolderForFile(file: TFile): TFolder | null {
   }
   return null;
 }
-

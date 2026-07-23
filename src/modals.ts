@@ -277,9 +277,9 @@ export class DeleteFolderTaskModal extends Modal {
 
     new Setting(contentEl)
       .addButton((btn) => {
-        btn
-          .setButtonText("Delete folder and content")
+        (btn as unknown as { setWarning: () => typeof btn })
           .setWarning()
+          .setButtonText("Delete folder and content")
           .onClick(() => {
             this.close();
             this.onConfirm();
@@ -294,4 +294,3 @@ export class DeleteFolderTaskModal extends Modal {
     this.contentEl.empty();
   }
 }
-
