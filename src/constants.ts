@@ -37,6 +37,39 @@ export const CONFIG_KEY_CARD_TEMPLATE = "cardTemplate";
 /** Key used by BasesViewConfig.set/get to persist the resolved tasks folder path in the .base file. */
 export const CONFIG_KEY_TASKS_FOLDER = "tasksFolder";
 
+/** Key used by BasesViewConfig.set/get to persist the task storage mode ('file' vs 'folder'). */
+export const CONFIG_KEY_TASK_STORAGE_MODE = "taskStorageMode";
+
+/** Key used by BasesViewConfig.set/get to persist attachment subfolder routing rules. */
+export const CONFIG_KEY_ATTACHMENT_RULES = "attachmentRules";
+
+/** Default extension mappings to subfolders inside a task folder */
+export const DEFAULT_ATTACHMENT_RULES: Record<string, string> = {
+  // Images
+  png: "images",
+  jpg: "images",
+  jpeg: "images",
+  gif: "images",
+  svg: "images",
+  webp: "images",
+  bmp: "images",
+  ico: "images",
+  apng: "images",
+  avif: "images",
+  heic: "images",
+  heif: "images",
+  // Documents
+  pdf: "documents",
+  doc: "documents",
+  docx: "documents",
+  xls: "documents",
+  xlsx: "documents",
+  ppt: "documents",
+  pptx: "documents",
+  txt: "documents",
+  csv: "documents",
+};
+
 /**
  * Regex matching characters that are invalid in file/folder names.
  * Used when sanitizing user input before creating vault items.

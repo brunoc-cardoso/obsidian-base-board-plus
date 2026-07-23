@@ -19,6 +19,8 @@ import { ORDER_PROPERTY, sanitizeFilename } from "./constants";
 import { relativeLuminance } from "./color-utils";
 import type { OrderValue } from "./order";
 import { CardDetailModal } from "./card-detail-modal";
+import { DeleteFolderTaskModal } from "./modals";
+import { getTaskFolderForFile } from "./folder-utils";
 
 const IMAGE_EXTENSIONS = new Set([
   "apng",
@@ -524,8 +526,18 @@ export class CardManager {
         .setTitle("Delete")
         .setIcon("lucide-trash-2")
         .onClick(async () => {
-          await this.view.app.fileManager.trashFile(file);
-          new Notice(`Moved "${file.basename}" to trash`);
+          const taskFolder = getTaskFolderForFile(file);
+          if (taskFolder) {
+            new DeleteFolderTaskModal(this.view.app, taskFolder.name, () => {
+              void (async () => {
+                await this.view.app.fileManager.trashFile(taskFolder);
+                new Notice(`Moved task folder "${taskFolder.name}" to trash`);
+              })();
+            }).open();
+          } else {
+            await this.view.app.fileManager.trashFile(file);
+            new Notice(`Moved "${file.basename}" to trash`);
+          }
         });
     });
 
@@ -552,12 +564,24 @@ export class CardManager {
       committed = true;
       const newName = input.value.trim();
       if (newName && newName !== file.basename) {
-        const newPath = file.path.replace(
-          /[^/]+\.md$/,
-          `${sanitizeFilename(newName)}.md`,
-        );
+        const safeName = sanitizeFilename(newName);
+        const taskFolder = getTaskFolderForFile(file);
+
         try {
-          await this.view.app.fileManager.renameFile(file, newPath);
+          if (taskFolder) {
+            const newNotePath = `${taskFolder.path}/${safeName}.md`;
+            const parentPath = taskFolder.parent?.path;
+            const newFolderPath = parentPath ? `${parentPath}/${safeName}` : safeName;
+
+            await this.view.app.fileManager.renameFile(file, newNotePath);
+            await this.view.app.fileManager.renameFile(taskFolder, newFolderPath);
+          } else {
+            const newPath = file.path.replace(
+              /[^/]+\.md$/,
+              `${safeName}.md`,
+            );
+            await this.view.app.fileManager.renameFile(file, newPath);
+          }
         } catch (err) {
           new Notice(`Rename failed: ${String(err)}`);
         }

@@ -10,6 +10,7 @@ import { KanbanView } from "./kanban-view";
 import { sanitizeFilename } from "./constants";
 import { CreateBoardModal, BoardConfig } from "./modals";
 import { updateBaseFolderReferences } from "./folder-rename";
+import { AttachmentManager } from "./attachment-manager";
 
 // ---------------------------------------------------------------------------
 //  Plugin
@@ -23,6 +24,9 @@ export default class BaseBoardPlugin extends Plugin {
   private folderRenameFlushTimer: number | null = null;
 
   async onload() {
+    const attachmentManager = new AttachmentManager(this.app);
+    attachmentManager.registerEvents(this);
+
     this.registerBasesView("kanban", {
       name: "Kanban",
       icon: "lucide-kanban",

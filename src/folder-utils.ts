@@ -101,3 +101,30 @@ export function getTasksFolder(
 
   return detectAndPersistTasksFolder(app, entries, config, sampleFile);
 }
+
+export function isFolderTask(file: TFile): boolean {
+  const parent = file.parent;
+  if (!parent || parent.isRoot()) return false;
+
+  // Direct match: folder has the same name as the note basename
+  if (parent.name === file.basename) return true;
+
+  // Index or task file inside a subfolder
+  if (
+    (file.basename.toLowerCase() === "index" ||
+      file.basename.toLowerCase() === "task") &&
+    !parent.isRoot()
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+export function getTaskFolderForFile(file: TFile): TFolder | null {
+  if (isFolderTask(file)) {
+    return file.parent ?? null;
+  }
+  return null;
+}
+

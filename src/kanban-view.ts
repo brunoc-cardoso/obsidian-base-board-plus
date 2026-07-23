@@ -24,6 +24,7 @@ import {
   readOrderValue,
 } from "./order";
 import {
+  CONFIG_KEY_TASK_STORAGE_MODE,
   NO_VALUE_COLUMN,
   ORDER_PROPERTY,
   CONFIG_KEY_COLUMNS,
@@ -38,7 +39,7 @@ import {
 } from "./constants";
 
 import { captureScrollState, restoreScrollState } from "./scroll-manager";
-import { getTasksFolder } from "./folder-utils";
+import { getTasksFolder, getTaskFolderForFile } from "./folder-utils";
 import {
   getColumnName,
   getWipLimit,
@@ -170,6 +171,16 @@ export class KanbanView extends BasesView implements HoverParent {
             },
           },
           {
+            key: CONFIG_KEY_TASK_STORAGE_MODE,
+            type: "dropdown" as const,
+            displayName: "Task storage mode",
+            default: "folder",
+            options: {
+              folder: "Folder with images subfolder",
+              file: "Single Markdown file",
+            },
+          },
+          {
             key: CONFIG_KEY_COVER_PROPERTY,
             type: "text" as const,
             displayName: "Cover property",
@@ -238,12 +249,29 @@ export class KanbanView extends BasesView implements HoverParent {
         ? tasksFolder
         : `${tasksFolder}/${sanitizedCol}`;
 
-    if (file.parent?.path === targetFolder) return;
-
     const vault = this.app.vault;
     if (!vault.getAbstractFileByPath(targetFolder)) {
       await vault.createFolder(targetFolder);
     }
+
+    const taskFolder = getTaskFolderForFile(file);
+    if (taskFolder) {
+      if (taskFolder.parent?.path === targetFolder) return;
+
+      let targetFolderPath = `${targetFolder}/${taskFolder.name}`;
+      if (targetFolderPath === taskFolder.path) return;
+
+      let counter = 1;
+      while (vault.getAbstractFileByPath(targetFolderPath)) {
+        targetFolderPath = `${targetFolder}/${taskFolder.name} ${counter}`;
+        counter++;
+      }
+
+      await this.app.fileManager.renameFile(taskFolder, targetFolderPath);
+      return;
+    }
+
+    if (file.parent?.path === targetFolder) return;
 
     let targetPath = `${targetFolder}/${file.name}`;
     if (targetPath === file.path) return;
@@ -334,26 +362,32 @@ export class KanbanView extends BasesView implements HoverParent {
    */
   public getGroupByProperty(): string | null {
     const cfg = this.config as {
-      groupBy?: { property?: string };
+      groupBy?: { property?: string } | string;
       get?: (key: string) => unknown;
     };
 
     // 1. Direct access to the built-in groupBy config property
     const groupBy = cfg?.groupBy;
-    if (groupBy?.property) {
+    if (typeof groupBy === "string") {
+      return groupBy.startsWith("note.") ? groupBy.slice(5) : groupBy;
+    }
+    if (groupBy && typeof groupBy === "object" && "property" in groupBy && typeof groupBy.property === "string") {
       const raw: string = groupBy.property;
       return raw.startsWith("note.") ? raw.slice(5) : raw;
     }
 
-    // 2. Fallback: try the custom-options API in case future Obsidian
-    //    versions surface groupBy through get()
-    const fromGet = cfg?.get?.("groupBy") as { property?: string } | undefined;
-    if (fromGet?.property) {
+    // 2. Fallback: try the custom-options API
+    const fromGet = cfg?.get?.("groupBy") as { property?: string } | string | undefined;
+    if (typeof fromGet === "string") {
+      return fromGet.startsWith("note.") ? fromGet.slice(5) : fromGet;
+    }
+    if (fromGet && typeof fromGet === "object" && "property" in fromGet && typeof fromGet.property === "string") {
       const raw: string = fromGet.property;
       return raw.startsWith("note.") ? raw.slice(5) : raw;
     }
 
-    return null;
+    // Default fallback to "status" if no groupBy property is specified
+    return "status";
   }
 
   public getCardOpenBehavior(): "active" | "modal" | "split" | "tab" {

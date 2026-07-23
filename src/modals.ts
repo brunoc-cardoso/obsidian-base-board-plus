@@ -253,3 +253,45 @@ export class CreateBoardModal extends Modal {
     this.contentEl.empty();
   }
 }
+
+// ---------------------------------------------------------------------------
+//  "Delete folder task" confirmation modal
+// ---------------------------------------------------------------------------
+
+export class DeleteFolderTaskModal extends Modal {
+  private taskName: string;
+  private onConfirm: () => void;
+
+  constructor(app: App, taskName: string, onConfirm: () => void) {
+    super(app);
+    this.taskName = taskName;
+    this.onConfirm = onConfirm;
+  }
+
+  onOpen(): void {
+    const { contentEl } = this;
+    contentEl.createEl("h3", { text: `Delete task folder: ${this.taskName}` });
+    contentEl.createEl("p", {
+      text: `Are you sure you want to delete the entire task folder "${this.taskName}" including all images and attachments?`,
+    });
+
+    new Setting(contentEl)
+      .addButton((btn) => {
+        btn
+          .setButtonText("Delete folder and content")
+          .setWarning()
+          .onClick(() => {
+            this.close();
+            this.onConfirm();
+          });
+      })
+      .addButton((btn) => {
+        btn.setButtonText("Cancel").onClick(() => this.close());
+      });
+  }
+
+  onClose(): void {
+    this.contentEl.empty();
+  }
+}
+

@@ -7,6 +7,9 @@ import {
   NO_VALUE_COLUMN,
   CONFIG_KEY_COLUMNS,
   CONFIG_KEY_WIP_LIMITS,
+  CONFIG_KEY_TASK_STORAGE_MODE,
+  CONFIG_KEY_ATTACHMENT_RULES,
+  DEFAULT_ATTACHMENT_RULES,
 } from "./constants";
 import { NullValue } from "obsidian";
 import type { BasesEntryGroup } from "obsidian"; // Adjust as needed if types differ
@@ -92,3 +95,35 @@ export function saveColumns(
   const toSave = columns.map((col) => (col === NO_VALUE_COLUMN ? "" : col));
   config?.set(CONFIG_KEY_COLUMNS, toSave);
 }
+
+export function getTaskStorageMode(
+  config: BaseConfig | null | undefined,
+): "file" | "folder" {
+  const mode = config?.get(CONFIG_KEY_TASK_STORAGE_MODE);
+  if (mode === "file") return "file";
+
+  const directMode = (config as { taskStorageMode?: unknown } | null | undefined)
+    ?.taskStorageMode;
+  if (directMode === "file") return "file";
+
+  return "folder";
+}
+
+export function getAttachmentSubfolder(
+  config: BaseConfig | null | undefined,
+  extension: string,
+): string {
+  const ext = extension.toLowerCase().replace(/^\./, "");
+  const customRules = config?.get(CONFIG_KEY_ATTACHMENT_RULES) as
+    | Record<string, string>
+    | undefined;
+
+  if (customRules && customRules[ext]) {
+    return customRules[ext];
+  }
+  if (DEFAULT_ATTACHMENT_RULES[ext]) {
+    return DEFAULT_ATTACHMENT_RULES[ext];
+  }
+  return "attachments";
+}
+

@@ -1,5 +1,6 @@
 import { App, Notice, parseYaml, TFile } from "obsidian";
 import type { BaseConfig } from "./board-config";
+import { getTaskStorageMode } from "./board-config";
 import {
   NO_VALUE_COLUMN,
   ORDER_PROPERTY,
@@ -93,11 +94,36 @@ export async function createCardFile(
     await vault.createFolder(destFolder);
   }
 
-  let destPath = `${destFolder}/${safeTitle}.md`;
-  let counter = 1;
-  while (vault.getAbstractFileByPath(destPath)) {
-    destPath = `${destFolder}/${safeTitle} ${counter}.md`;
-    counter++;
+  const storageMode = getTaskStorageMode(config);
+  let destPath: string;
+
+  if (storageMode === "folder") {
+    let taskFolderPath = `${destFolder}/${safeTitle}`;
+    let taskName = safeTitle;
+    let counter = 1;
+    while (vault.getAbstractFileByPath(taskFolderPath)) {
+      taskName = `${safeTitle} ${counter}`;
+      taskFolderPath = `${destFolder}/${taskName}`;
+      counter++;
+    }
+
+    // Create the task directory
+    await vault.createFolder(taskFolderPath);
+
+    // Create default images subfolder inside the task directory
+    const imagesFolderPath = `${taskFolderPath}/images`;
+    if (!vault.getAbstractFileByPath(imagesFolderPath)) {
+      await vault.createFolder(imagesFolderPath);
+    }
+
+    destPath = `${taskFolderPath}/${taskName}.md`;
+  } else {
+    destPath = `${destFolder}/${safeTitle}.md`;
+    let counter = 1;
+    while (vault.getAbstractFileByPath(destPath)) {
+      destPath = `${destFolder}/${safeTitle} ${counter}.md`;
+      counter++;
+    }
   }
 
   // --- Template: read body text and frontmatter keys ---
