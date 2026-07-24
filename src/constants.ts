@@ -80,6 +80,10 @@ export const UNSAFE_FILENAME_CHARS = /[\\/:*?"<>|]/g;
  * Sanitize a string for use as a file or folder name by stripping
  * characters that are not allowed on common operating systems.
  */
-export function sanitizeFilename(name: string): string {
-  return name.replace(UNSAFE_FILENAME_CHARS, "");
+export function sanitizeFilename(name: string, maxLen = 60): string {
+  const cleaned = name.replace(UNSAFE_FILENAME_CHARS, "").trim();
+  if (cleaned.length > maxLen) {
+    return cleaned.substring(0, maxLen).trim();
+  }
+  return cleaned;
 }

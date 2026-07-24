@@ -72,20 +72,6 @@ export class AttachmentManager {
       }
 
       const buffer = await attachmentFile.arrayBuffer();
-      const sanitizedName = attachmentFile.name.replace(/[\\/:*?"<>|]/g, "");
-      let destPath = `${destFolderPath}/${sanitizedName}`;
-
-      let counter = 1;
-      const lastDot = sanitizedName.lastIndexOf(".");
-      const baseNameWithoutExt =
-        lastDot > 0 ? sanitizedName.substring(0, lastDot) : sanitizedName;
-
-      while (this.app.vault.getAbstractFileByPath(destPath)) {
-        destPath = `${destFolderPath}/${baseNameWithoutExt}_${counter}.${ext}`;
-        counter++;
-      }
-
-      const createdFile = await this.app.vault.createBinary(destPath, buffer);
 
       const isImage = [
         "png",
@@ -99,6 +85,18 @@ export class AttachmentManager {
         "apng",
         "avif",
       ].includes(ext.toLowerCase());
+
+      const prefix = isImage ? "img" : "doc";
+      const timestamp = Date.now();
+      let destPath = `${destFolderPath}/${prefix}_${timestamp}.${ext}`;
+
+      let counter = 1;
+      while (this.app.vault.getAbstractFileByPath(destPath)) {
+        destPath = `${destFolderPath}/${prefix}_${timestamp}_${counter}.${ext}`;
+        counter++;
+      }
+
+      const createdFile = await this.app.vault.createBinary(destPath, buffer);
 
       const relativePath = createdFile.path.startsWith(taskFolder.path + "/")
         ? createdFile.path.substring(taskFolder.path.length + 1)
